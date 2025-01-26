@@ -1,0 +1,9 @@
+/.DS_Store
+/.coverage
+/.env
+/.pytest_cache
+/.vscode
+/cookies.pkl
+/latest.log
+/scrapy.cfg
+/venv

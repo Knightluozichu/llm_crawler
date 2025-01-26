@@ -1,0 +1,657 @@
+import streamlit as st
+import json
+from kw import encode_kw
+import os
+import subprocess
+import sys
+from zhaopin_dataextuce import allPage, cache_all_page, save_to_csv
+import base64
+from zhilian_login import get_logged_in_driver, is_login_success
+from selenium.webdriver.chrome.options import Options
+import time
+from zhaopin_maxpage import test_page_input
+import pickle
+from selenium import webdriver
+
+def quit_all_drivers():
+    """退出所有活跃的driver"""
+    try:
+        if st.session_state.driver:
+            st.session_state.driver.quit()
+            st.session_state.driver = None
+            st.session_state.login_status = False
+    except Exception as e:
+        print(f"关闭浏览器时出错: {e}")
+
+def check_and_install_dependencies():
+    """检查并安装必要的依赖"""
+    required_packages = ['selenium']
+    for package in required_packages:
+        try:
+            __import__(package)
+        except ImportError:
+            st.warning(f"正在安装必要的依赖包: {package}")
+            subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+            st.success(f"{package} 安装成功!")
+
+# 在页面最开始添加依赖检查
+# check_and_install_dependencies()
+
+# 现在可以安全地导入selenium相关的模块
+# try:
+#     selenium_available = True
+# except ImportError as e:
+#     st.error(f"导入爬虫模块失败: {str(e)}")
+#     st.info("请确保已正确安装所有依赖，如果问题持续存在，请尝试重启应用")
+#     selenium_available = False
+
+# 定义默认配置
+DEFAULT_CONFIG = {
+    "data": {
+        "hotCity": [{"code": "530", "name": "北京"}, {"code": "538", "name": "上海"}],
+        "industry": [{"code": "0", "name": "不限"}, {"code": "10100", "name": "IT软件"}],
+        "salaryType": [{"code": "0,0", "name": "不限"}, {"code": "10,20", "name": "1-2万/月"}],
+        "educationType": [{"code": "0", "name": "不限"}, {"code": "5", "name": "本科"}],
+        "workExpType": [{"code": "0", "name": "不限"}, {"code": "103", "name": "1-3年"}],
+        "jobStatus": [{"code": "0", "name": "不限"}, {"code": "1", "name": "全职"}],
+        "companySize": [{"code": "0", "name": "不限"}, {"code": "3", "name": "100-499人"}],
+        "companyType": [{"code": "0", "name": "不限"}, {"code": "1", "name": "民营"}]
+    }
+}
+
+# 获取当前文件所在目录的绝对路径和设置所需路径
+current_dir = os.path.dirname(os.path.abspath(__file__))
+cookie_path = os.path.join(current_dir, 'zhilian_cookies.pkl')
+config_path = os.path.join(current_dir, 'zhaopin.json')
+
+def has_valid_cookies(cookie_path):
+    """检查是否存在有效的cookie文件"""
+    try:
+        if os.path.exists(cookie_path):
+            with open(cookie_path, 'rb') as f:
+                cookies = pickle.load(f)
+                return bool(cookies)
+        return False
+    except:
+        return False
+
+# 初始化所有session state变量（放在最开始）
+if 'init_done' not in st.session_state:
+    cookies_exist = has_valid_cookies(cookie_path)
+    
+    st.session_state.update({
+        'init_done': True,
+        'has_cookies': cookies_exist,
+        'login_status': cookies_exist,  # 如果有cookie就默认已登录
+        'show_crawler_config': False,
+        'total_pages': 0,
+        'generated_link': "",
+        'extract_pages': 1,
+        'driver': None,
+        'cookie_path': cookie_path,
+        'last_check_time': 0
+    })
+
+try:
+    # 尝试加载配置文件
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config = json.load(f)['data']
+except FileNotFoundError:
+    # 如果文件不存在，使用默认配置
+    st.warning(f"配置文件 {config_path} 未找到，使用默认配置")
+    config = DEFAULT_CONFIG['data']
+except json.JSONDecodeError:
+    # 如果文件格式错误，使用默认配置
+    st.warning("配置文件格式错误，使用默认配置")
+    config = DEFAULT_CONFIG['data']
+
+# 在文件开头添加会话状态初始化
+if 'init_done' not in st.session_state:
+    st.session_state.init_done = False
+
+if not st.session_state.init_done:
+    st.session_state.update({
+        'show_crawler_config': False,
+        'total_pages': 0,
+        'generated_link': "",
+        'extract_pages': 1,
+        'login_status': False,
+        'driver': None,
+        'login_checked': False,
+        'last_check_time': 0,
+        'cookie_path': os.path.join(current_dir, 'zhilian_cookies.pkl')
+    })
+    st.session_state.init_done = True
+
+def generate_url():
+    base_url = "https://www.zhaopin.com/sou/"
+    
+    # 获取输入值并处理
+    city_code = st.session_state.city[0]  # 获取元组中的 code
+    position_raw = st.session_state.position 
+    position_encoded = encode_kw(position_raw) if position_raw else ""
+    industry = st.session_state.industry[0]  # 获取元组中的 code
+    page = st.session_state.page
+    salary_range = st.session_state.salary[0]  # 获取元组中的 code
+    education = st.session_state.education[0]  # 获取元组中的 code
+    work_exp = st.session_state.work_exp[0]  # 获取元组中的 code
+    job_type = st.session_state.job_type[0]  # 获取元组中的 code
+    company_type = st.session_state.company_type[0]  # 获取元组中的 code
+    company_size = st.session_state.company_size[0]  # 获取元组中的 code
+
+    # 构建URL
+    url = f"{base_url}jl{city_code}/in{industry}/{position_encoded}/p{page}"
+    url += f"?sl={salary_range}"  # salary_range 已经包含了逗号分隔的值
+    url += f"&el={education}"
+    url += f"&we={work_exp}"
+    url += f"&et={job_type}"
+    url += f"&ct={company_type}"
+    url += f"&cs={company_size}"
+    
+    if url != st.session_state.generated_link:
+        st.session_state.generated_link = url
+        st.session_state.total_pages = 0  # 重置页数
+    return url
+
+def validate_option_data(data, field_name):
+    """验证选项数据格式并规范化"""
+    try:
+        return [(str(item.get("code", "0")), str(item.get("name", "不限"))) 
+                for item in data.get(field_name, [{"code": "0", "name": "不限"}])]
+    except Exception as e:
+        st.warning(f"处理{field_name}数据时出错: {str(e)}")
+        return [("0", "不限")]
+
+# 页面布局
+st.title("智联招聘链接生成器")
+
+# 基本搜索条件
+st.subheader("基本搜索条件")
+col1, col2 = st.columns(2)
+with col1:
+    st.selectbox("城市", 
+                options=validate_option_data(config, "hotCity"),
+                format_func=lambda x: x[1],
+                key="city")
+    
+with col2:
+    st.text_input("职位关键词", value="python", key="position")
+
+# 行业与薪资
+col3, col4 = st.columns(2)
+with col3:
+    st.selectbox("行业", 
+                options=validate_option_data(config, "industry"),
+                format_func=lambda x: x[1],
+                key="industry")
+
+with col4:
+    st.selectbox("薪资范围",
+                options=validate_option_data(config, "salaryType"),
+                format_func=lambda x: x[1],
+                key="salary")
+
+# 筛选条件
+st.subheader("筛选条件")
+col5, col6 = st.columns(2)
+with col5:
+    st.selectbox("学历要求",
+                options=validate_option_data(config, "educationType"),
+                format_func=lambda x: x[1],
+                key="education")
+    
+    st.selectbox("工作经验",
+                options=validate_option_data(config, "workExpType"),
+                format_func=lambda x: x[1],
+                key="work_exp")
+
+with col6:
+    st.selectbox("工作类型",
+                options=validate_option_data(config, "jobStatus"),
+                format_func=lambda x: x[1],
+                key="job_type")
+                
+    st.selectbox("公司规模",
+                options=validate_option_data(config, "companySize"),
+                format_func=lambda x: x[1],
+                key="company_size")
+
+st.selectbox("公司类型",
+            options=validate_option_data(config, "companyType"),
+            format_func=lambda x: x[1],
+            key="company_type")
+
+# 分页
+st.number_input("页码", min_value=1, value=1, key="page")
+
+
+# 修改生成链接按钮部分
+# 使用一个列来放置按钮
+col_gen, col_copy = st.columns([2, 1])
+with col_gen:
+    if st.button("生成链接", key="gen_link_btn"):
+        generated_link = generate_url()
+        st.session_state.generated_link = generated_link
+        st.success("链接已生成:")
+        st.code(generated_link)
+
+# 仅当有生成的链接时显示复制按钮
+with col_copy:
+    if st.session_state.generated_link:
+        st.button("复制链接", 
+                 key="copy_link_btn",
+                 on_click=lambda: st.write(
+                     '<script>navigator.clipboard.writeText("' + 
+                     st.session_state.generated_link + 
+                     '")</script>', 
+                     unsafe_allow_html=True
+                 ))
+
+# 显示已生成的链接（如果存在）
+if st.session_state.generated_link and not st.session_state.get("gen_link_btn"):
+    st.code(st.session_state.generated_link)
+
+# 在页面最开始添加登录状态检查
+if 'login_status' not in st.session_state:
+    st.session_state.login_status = False
+if 'driver' not in st.session_state:
+    st.session_state.driver = None
+
+# 添加登录状态检查区域
+st.sidebar.title("登录状态")
+
+def save_cookies(driver, cookie_path):
+    """保存cookies到文件"""
+    if driver:
+        cookies = driver.get_cookies()
+        with open(cookie_path, 'wb') as f:
+            pickle.dump(cookies, f)
+
+def load_cookies(driver, cookie_path):
+    """从文件加载cookies"""
+    try:
+        with open(cookie_path, 'rb') as f:
+            cookies = pickle.load(f)
+            for cookie in cookies:
+                try:
+                    driver.add_cookie(cookie)
+                except:
+                    continue
+        return True
+    except Exception as e:
+        print(f"加载cookies失败: {e}")
+        return False
+
+def check_login_status(url=None, force_check=False):
+    """改进的登录状态检查，使用cookies，检查完成后关闭浏览器"""
+    current_time = time.time()
+    if not force_check and hasattr(st.session_state, 'last_check_time'):
+        if current_time - st.session_state.last_check_time < 60:
+            if st.session_state.login_status:
+                st.sidebar.success("当前状态：已登录")
+            else:
+                st.sidebar.warning("当前状态：未登录")
+            return st.session_state.login_status
+
+    try:
+        if st.session_state.driver:
+            st.session_state.login_status = is_login_success(st.session_state.driver)
+            if st.session_state.login_status:
+                # 登录成功时保存cookies后关闭浏览器
+                save_cookies(st.session_state.driver, st.session_state.cookie_path)
+                st.session_state.driver.quit()
+                st.session_state.driver = None
+            else:
+                # 登录失败，清理旧driver
+                try:
+                    st.session_state.driver.quit()
+                except:
+                    pass
+                st.session_state.driver = None
+                # 尝试重新登录
+                temp_driver = get_logged_in_driver(url)
+                if temp_driver and is_login_success(temp_driver):
+                    st.session_state.login_status = True
+                    save_cookies(temp_driver, st.session_state.cookie_path)
+                temp_driver.quit()  # 无论成功与否都关闭临时driver
+        else:
+            # 首次登录尝试
+            temp_driver = get_logged_in_driver(url)
+            if temp_driver:
+                st.session_state.login_status = is_login_success(temp_driver)
+                if st.session_state.login_status:
+                    save_cookies(temp_driver, st.session_state.cookie_path)
+                temp_driver.quit()  # 检查完成后关闭浏览器
+            
+    except Exception as e:
+        st.sidebar.error(f"登录状态检查出错: {str(e)}")
+        st.session_state.login_status = False
+        if st.session_state.driver:
+            try:
+                st.session_state.driver.quit()
+            except:
+                pass
+            st.session_state.driver = None
+    finally:
+        st.session_state.last_check_time = current_time
+    
+    # 更新状态显示
+    if st.session_state.login_status:
+        st.sidebar.success("当前状态：已登录 (Cookie已保存)")
+    else:
+        st.sidebar.warning("当前状态：未登录")
+    
+    return st.session_state.login_status
+
+# if st.sidebar.button("检查登录状态", key="check_login_btn"):
+#     check_login_status()
+
+# 修改手动登录按钮部分
+if st.sidebar.button("手动登录", key="manual_login_btn"):
+    try:
+        if not (st.session_state.driver and is_login_success(st.session_state.driver)):
+            save_cookies(st.session_state.driver, st.session_state.cookie_path)
+            old_driver = st.session_state.driver
+            driver = get_logged_in_driver()
+            # 尝试加载cookies
+            if load_cookies(driver, st.session_state.cookie_path):
+                driver.refresh()
+            if driver and is_login_success(driver):
+                st.session_state.login_status = True
+                st.session_state.driver = driver
+                save_cookies(driver, st.session_state.cookie_path)
+                st.sidebar.success("登录成功！")
+                quit_all_drivers()  # 登录成功后关闭浏览器
+            else:
+                st.sidebar.error("登录失败，请重试")
+                if driver:
+                    driver.quit()
+        else:
+            st.sidebar.info("已经处于登录状态")
+    except Exception as e:
+        st.sidebar.error(f"登录过程中出错: {str(e)}")
+
+# 修改抓取数据配置逻辑
+if st.button("抓取数据配置", key="crawler_config_btn") or st.session_state.show_crawler_config:
+    st.session_state.show_crawler_config = True
+    if not st.session_state.generated_link:
+        st.warning("请先生成链接，再点击此按钮")
+    else:
+        if st.session_state.total_pages == 0:
+            try:
+                with st.spinner('获取总页数...'):
+                    try:
+                        # 创建一个普通的Chrome浏览器实例（非无头模式）
+                        temp_driver = webdriver.Chrome()
+                        
+                        try:
+                            # 加载cookies
+                            if os.path.exists(st.session_state.cookie_path):
+                                temp_driver.get("https://www.zhaopin.com")
+                                load_cookies(temp_driver, st.session_state.cookie_path)
+                            
+                            # 获取总页数
+                            orig, max_page = test_page_input(
+                                st.session_state.generated_link,
+                                existing_driver=temp_driver
+                            )
+                            
+                            if max_page:
+                                st.session_state.total_pages = int(max_page)
+                                st.success(f"获取成功！总页数: {st.session_state.total_pages}")
+                            else:
+                                st.error("无法获取总页数")
+                                
+                        finally:
+                            # 确保在获取页数后立即关闭浏览器
+                            temp_driver.quit()
+                            
+                    except Exception as inner_e:
+                        st.error(f"获取总页数时出错: {str(inner_e)}")
+                            
+            except Exception as e:
+                st.error(f"获取页数失败: {str(e)}")
+
+# 在抓取数据配置部分修改代码
+if st.session_state.show_crawler_config:
+    if not check_login_status():
+        st.warning("请先登录后再进行数据抓取")
+    else:
+        # 显示总页数
+        if st.session_state.total_pages > 0:
+            st.info(f"总页数: {st.session_state.total_pages}")
+            
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                extract_pages = st.number_input(
+                    "选择抓取页数", 
+                    min_value=1, 
+                    max_value=st.session_state.total_pages,
+                    value=st.session_state.extract_pages,
+                    key="extract_pages_input"
+                )
+            
+            if st.button("开始抓取", key="start_crawl_btn"):
+                try:
+                    progress_text = st.empty()
+                    status_text = st.empty()
+                    progress_dots = st.empty()
+                    
+                    # 创建普通模式的Chrome浏览器（移除无头模式）
+                    crawler_driver = webdriver.Chrome()
+                    try:
+                        # 加载cookies
+                        if st.session_state.cookie_path and os.path.exists(st.session_state.cookie_path):
+                            crawler_driver.get("https://www.zhaopin.com")
+                            load_cookies(crawler_driver, st.session_state.cookie_path)
+                        
+                        # 开始抓取数据
+                        cache_all_page(
+                            st.session_state.generated_link, 
+                            max_pages=extract_pages,
+                            existing_driver=crawler_driver
+                        )
+                        
+                        status_text.success("✅ 数据抓取完成")
+                        
+                        # 显示下载按钮
+                        csv_path = os.path.join(current_dir, '../data/search_job.csv')
+                        if os.path.exists(csv_path):
+                            with open(csv_path, 'rb') as f:
+                                csv_data = f.read()
+                            b64 = base64.b64encode(csv_data).decode()
+                            href = f'<a href="data:file/csv;base64,{b64}" download="search_job.csv">下载数据文件</a>'
+                            st.markdown(href, unsafe_allow_html=True)
+                    
+                    finally:
+                        # 确保抓取完成后关闭浏览器
+                        crawler_driver.quit()
+                        progress_text.empty()
+                        progress_dots.empty()
+                        
+                except Exception as e:
+                    st.error(f"抓取失败: {str(e)}")
+                    progress_text.empty()
+                    status_text.empty()
+                    progress_dots.empty()
+
+# 在页面关闭时清理driver
+def cleanup():
+    """程序退出时清理所有driver"""
+    quit_all_drivers()
+
+# 注册cleanup函数
+import atexit
+atexit.register(cleanup)
+
+
+# 添加退出函数定义（放在顶部函数定义区域）
+def quit_all_drivers():
+    """退出所有活跃的driver"""
+    try:
+        if st.session_state.driver:
+            st.session_state.driver.quit()
+            st.session_state.driver = None
+            st.session_state.login_status = False
+    except Exception as e:
+        print(f"关闭浏览器时出错: {e}")
+
+def has_valid_cookies():
+    """检查是否存在有效的cookie文件"""
+    try:
+        if os.path.exists(st.session_state.cookie_path):
+            with open(st.session_state.cookie_path, 'rb') as f:
+                cookies = pickle.load(f)
+                return bool(cookies)  # 如果cookies非空则返回True
+        return False
+    except:
+        return False
+
+# 修改登录状态初始化部分
+if 'init_done' not in st.session_state:
+    st.session_state.init_done = False
+
+if not st.session_state.init_done:
+    st.session_state.update({
+        # ...existing state fields...
+        'has_cookies': has_valid_cookies()  # 添加cookie状态
+    })
+    st.session_state.init_done = True
+    # 如果有cookie则默认设置登录状态为True
+    if st.session_state.has_cookies:
+        st.session_state.login_status = True
+
+
+
+def delete_cookies():
+    """删除本地cookie文件"""
+    try:
+        if os.path.exists(st.session_state.cookie_path):
+            os.remove(st.session_state.cookie_path)
+            st.session_state.has_cookies = False
+            st.session_state.login_status = False
+            return True
+        return False
+    except Exception as e:
+        print(f"删除cookie文件失败: {e}")
+        return False
+
+# Cookie状态显示和管理
+if st.session_state.has_cookies:
+    # 添加删除Cookie按钮
+    if st.sidebar.button("删除Cookie", key="delete_cookie_btn", type="secondary"):
+        if delete_cookies():
+            st.sidebar.success("Cookie已删除")
+            st.rerun()  # 刷新页面
+        else:
+            st.sidebar.error("删除Cookie失败")
+    st.sidebar.success("Cookie状态：已存在 ✅")
+else:
+    st.sidebar.warning("Cookie状态：未找到 ❌")
+
+
+# 修改check_login_status函数
+def check_login_status(url=None, force_check=False):
+    """改进的登录状态检查，优先使用cookies"""
+    # 如果有cookie且不是强制检查，直接返回True
+    if st.session_state.has_cookies and not force_check:
+        return True
+    
+    # 如果没有cookie，需要重新登录
+    if not st.session_state.has_cookies:
+        st.warning("需要登录后才能继续操作")
+        return False
+        
+    return st.session_state.login_status
+
+
+def has_valid_cookies():
+    """检查是否存在有效的cookie文件"""
+    cookie_path = os.path.join(current_dir, 'zhilian_cookies.pkl')
+    try:
+        if os.path.exists(cookie_path):
+            with open(cookie_path, 'rb') as f:
+                cookies = pickle.load(f)
+                return bool(cookies)
+        return False
+    except:
+        return False
+
+# 初始化所有session state变量
+if 'init_done' not in st.session_state:
+    st.session_state.init_done = False
+    st.session_state.has_cookies = has_valid_cookies()
+    st.session_state.show_crawler_config = False
+    st.session_state.total_pages = 0
+    st.session_state.generated_link = ""
+    st.session_state.extract_pages = 1
+    st.session_state.login_status = has_valid_cookies()  # 如果有cookie就默认已登录
+    st.session_state.driver = None
+    st.session_state.cookie_path = os.path.join(current_dir, 'zhilian_cookies.pkl')
+    st.session_state.last_check_time = 0
+
+
+
+# Cookie和登录状态管理函数定义
+def save_cookies(driver, cookie_path):
+    """保存cookies到文件"""
+    if driver:
+        cookies = driver.get_cookies()
+        with open(cookie_path, 'wb') as f:
+            pickle.dump(cookies, f)
+
+def load_cookies(driver, cookie_path):
+    """从文件加载cookies"""
+    try:
+        with open(cookie_path, 'rb') as f:
+            cookies = pickle.load(f)
+            for cookie in cookies:
+                try:
+                    driver.add_cookie(cookie)
+                except:
+                    continue
+        return True
+    except Exception as e:
+        print(f"加载cookies失败: {e}")
+        return False
+
+def delete_cookies():
+    try:
+        if os.path.exists(st.session_state.cookie_path):
+            os.remove(st.session_state.cookie_path)
+            st.session_state.has_cookies = False
+            st.session_state.login_status = False
+            return True
+        return False
+    except Exception as e:
+        print(f"删除cookie文件失败: {e}")
+        return False
+
+    st.session_state.show_crawler_config = True
+    if not st.session_state.generated_link:
+        st.warning("⚠️ 请先生成搜索链接")
+    else:
+        # 获取总页数
+        if st.session_state.total_pages == 0:
+            try:
+                with st.spinner('获取总页数...'):
+                    temp_driver = webdriver.Chrome()
+                    try:
+                        if os.path.exists(st.session_state.cookie_path):
+                            temp_driver.get("https://www.zhaopin.com")
+                            load_cookies(temp_driver, st.session_state.cookie_path)
+                        
+                        orig, max_page = test_page_input(
+                            st.session_state.generated_link,
+                            existing_driver=temp_driver
+                        )
+                        
+                        if max_page:
+                            st.session_state.total_pages = int(max_page)
+                            st.success(f"获取成功！总页数: {st.session_state.total_pages}")
+                        else:
+                            st.error("无法获取总页数")
+                    finally:
+                        temp_driver.quit()
+            except Exception as e:
+                st.error(f"获取页数失败: {str(e)}")

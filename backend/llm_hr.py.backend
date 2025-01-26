@@ -1,0 +1,211 @@
+import requests
+import time
+import jieba
+from requests.exceptions import ConnectionError
+from PyPDF2 import PdfReader
+import docx
+import re
+from io import BytesIO
+
+OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+
+def get_local_models():
+    """
+    获取 Ollama 本地可用模型列表(示例)。
+    若连接失败或接口结构有变，可自行调整。
+    """
+    max_retries = 3
+    retry_delay = 2
+    
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5)
+            if response.status_code == 200:
+                models = response.json().get('models', [])
+                return [model['name'] for model in models]
+            else:
+                print(f"API返回错误状态码: {response.status_code}")
+                return ["无法获取本地模型列表"]
+        except ConnectionError:
+            if attempt < max_retries - 1:
+                print(f"连接Ollama服务失败, {retry_delay}秒后重试...")
+                time.sleep(retry_delay)
+            else:
+                print("无法连接到Ollama服务, 请确保服务已启动")
+                return ["无法连接到Ollama服务"]
+        except Exception as e:
+            print(f"获取模型列表时发生错误: {str(e)}")
+            return [f"获取本地模型列表时出错: {str(e)}"]
+
+def parse_resume(file_bytes, file_type):
+    """
+    解析用户上传的简历（PDF或Word），返回文本内容。
+    """
+    try:
+        if file_type == "pdf":
+            reader = PdfReader(BytesIO(file_bytes))
+            text = ""
+            for page in reader.pages:
+                text += page.extract_text() or ""
+            return text
+        elif file_type in ["docx", "doc"]:
+            doc = docx.Document(BytesIO(file_bytes))
+            text = "\n".join([para.text for para in doc.paragraphs])
+            return text
+        else:
+            return "暂不支持的文件类型，无法解析。"
+    except Exception as e:
+        return f"解析失败，请检查简历文件格式或内容。错误信息: {str(e)}"
+
+def match_jobs_with_resume(resume_text, job_df, llm_mode, openai_key=None):
+    """
+    将简历与 job_df 进行简单匹配，返回前 10 条最匹配结果 (演示)。
+    实际可改为复杂算法或调用大模型。
+    
+    :param resume_text: 解析后的简历文本
+    :param job_df: 已筛选/处理后的 DataFrame
+    :param llm_mode: "local" 或 "openai"
+    :param openai_key: 若使用 openai，需要提供 key
+    :return: list of dict
+    """
+    if not resume_text or job_df.empty:
+        return []
+
+    # 分词简历文本
+    resume_tokens = set(jieba.lcut(resume_text.lower()))
+    
+    results = []
+    for idx, row in job_df.iterrows():
+        summary = str(row.get('job_summary', '')).lower()
+        salary = str(row.get('salary', '面议'))
+        job_name = str(row.get('position_name', '未知岗位'))
+        comp_name = str(row.get('company_name', '未知公司'))
+        
+        # 分词岗位描述
+        summary_tokens = set(jieba.lcut(summary))
+        
+        # 简易匹配度 = 交集词数 / (岗位关键词总数 + 1)
+        common_tokens = resume_tokens.intersection(summary_tokens)
+        match_score = len(common_tokens) / (len(summary_tokens) + 1)
+        
+        match_reason = f"简历与岗位描述存在 {len(common_tokens)} 个相同关键词"
+        
+        results.append({
+            "job_name": job_name,
+            "company_name": comp_name,
+            "match_score": round(match_score, 2),
+            "match_reason": match_reason,
+            "salary_range": salary,
+            "job_index": idx
+        })
+    
+    # 排序取前 10
+    results.sort(key=lambda x: x["match_score"], reverse=True)
+    return results[:10]
+
+def score_resume(resume_text: str) -> str:
+    """
+    使用正则简单提取简历的工作经历、教育、技能、优势等关键内容并进行加权打分。
+    分数权重: 工作经历40%、教育20%、技能30%、优势10%
+    这里为示例，实际可自行完善正则及解析逻辑。
+    """
+    # 示例正则结构，可根据实际简历格式进行调整
+    work_pattern = r"工作经历[:：](.*?)教育背景[:：]"
+    edu_pattern = r"教育背景[:：](.*?)技能[:：]"
+    skill_pattern = r"技能[:：](.*?)优势[:：]"
+    adv_pattern = r"优势[:：](.*)"
+
+    # 提取信息
+    work_match = re.search(work_pattern, resume_text, re.S)
+    edu_match = re.search(edu_pattern, resume_text, re.S)
+    skill_match = re.search(skill_pattern, resume_text, re.S)
+    adv_match = re.search(adv_pattern, resume_text, re.S)
+
+    # 计算各项分数(此处仅示例演算，可结合关键词匹配与量化逻辑完善)
+    work_score = 40 if work_match else 0
+    edu_score = 20 if edu_match else 0
+    skill_score = 30 if skill_match else 0
+    adv_score = 10 if adv_match else 0
+    total_score = work_score + edu_score + skill_score + adv_score
+
+    # 生成报告
+    report_lines = [
+        f"工作经历得分: {work_score}/40",
+        f"教育背景得分: {edu_score}/20",
+        f"技能得分: {skill_score}/30",
+        f"优势得分: {adv_score}/10",
+        f"综合得分: {total_score}/100"
+    ]
+    return "\n".join(report_lines)
+
+def modify_resume_for_job(original_resume, job_description, llm_mode, openai_key=None):
+    """
+    基于 original_resume 与 job_description，生成个性化修改后的简历文本。
+    使用提示词：“你是一名专业的 HR，根据岗位信息去修改简历，用你的专业知识来帮助求职者书写更好的更匹配的简历。”
+    """
+    system_prompt = "你是一名专业的 HR，根据岗位信息修改简历，用你的专业知识帮助求职者书写更好、更匹配的简历。"
+    user_prompt = (
+        f"=== 岗位信息 ===\n{job_description}\n\n"
+        f"=== 原简历 ===\n{original_resume}\n\n"
+        "请根据以上岗位信息修改简历，使其更加匹配目标岗位要求。"
+    )
+    
+    if llm_mode == "local":
+        try:
+            response = requests.post(
+                f"{OLLAMA_BASE_URL}/api/chat",  # 使用 chat 接口
+                json={
+                    "model": "llama3.2:latest",  # 使用 llama2 模型
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": system_prompt
+                        },
+                        {
+                            "role": "user",
+                            "content": user_prompt
+                        }
+                    ],
+                    "options": {
+                        "temperature": 0.7
+                    }
+                },
+                timeout=120
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if 'message' in result:  # chat API 返回的是 message 字段
+                    return result['message']['content'].strip()
+                else:
+                    return "AI模型返回格式错误，请重试。"
+            else:
+                error_msg = response.json().get('error', '未知错误')
+                return f"优化简历失败，错误信息: {error_msg}"
+                
+        except requests.exceptions.Timeout:
+            return "请求超时，请稍后重试。"
+        except Exception as e:
+            return f"优化简历时发生错误: {str(e)}"
+    
+    elif llm_mode == "openai":
+        # 使用 OpenAI API
+        try:
+            import openai
+            openai.api_key = openai_key
+            response = openai.ChatCompletion.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "你是一名专业的 HR，根据岗位信息修改简历，用专业知识帮助求职者书写更好、更匹配的简历。"},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=1500,
+                temperature=0.7
+            )
+            optimized_resume = response.choices[0].message['content'].strip()
+            return optimized_resume
+        except Exception as e:
+            return f"优化简历时发生错误: {str(e)}"
+    
+    else:
+        return "无效的 LLM 模式选择。"

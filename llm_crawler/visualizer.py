@@ -175,20 +175,11 @@ class DataVisualizer:
                     break
                     
             if not font_path:
-                # 如果找不到任何中文字体，使用默认字体
-                wc = WordCloud(
-                    width=800,
-                    height=400,
-                    background_color='white'
-                )
+                # 若找不到可用字体，则不指定 font_path
+                wc = WordCloud(width=800, height=400)
             else:
-                wc = WordCloud(
-                    font_path=font_path,
-                    width=800,
-                    height=400,
-                    background_color='white'
-                )
-                
+                wc = WordCloud(font_path=font_path, width=800, height=400)
+
             wc.generate_from_frequencies(word_freq)
             
             # 将词云转换为 Base64 图片
@@ -238,22 +229,22 @@ class DataVisualizer:
         
         # 高频关键词
         keywords = insights.get('keywords', [])
+        fig_keywords = go.Figure()
         if keywords:
-            # 计算关键词在 job_desc_words 中的出现总次数
+            # 统计关键词出现次数
             word_count = Counter()
             for words_list in self.processed_data['job_desc_words']:
                 for w in words_list:
                     if w in keywords:
                         word_count[w] += 1
-            
+            # 转为列表进行排序再绘制
+            data = sorted(word_count.items(), key=lambda x: x[1], reverse=True)
+            x_vals = [t[0] for t in data]
+            y_vals = [t[1] for t in data]
             fig_keywords = px.bar(
-                x=list(word_count.keys()),
-                y=list(word_count.values()),
+                x=x_vals,
+                y=y_vals,
                 labels={'x': '关键词', 'y': '出现次数'},
-                title='职位描述高频关键词 TOP 10'
+                title='高频关键词 TOP 10'
             )
-        else:
-            fig_keywords = go.Figure()
-            fig_keywords.update_layout(title='职位描述高频关键词 TOP 10（暂无数据）')
-        
         return fig_salary, fig_keywords

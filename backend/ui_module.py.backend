@@ -8,7 +8,122 @@ import streamlit as st
 
 from data_processor import DataProcessor
 from visualizer import DataVisualizer
-from llm_hr import get_local_models, parse_resume, match_jobs_with_resume, modify_resume_for_job, score_resume
+
+# ========== LLM 相关示例函数 ==========
+
+import requests
+import time
+import jieba
+from requests.exceptions import ConnectionError
+
+OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+
+
+def get_local_models():
+    """
+    获取 Ollama 本地可用模型列表(示例)。
+    若连接失败或接口结构有变，可自行调整。
+    """
+    max_retries = 3
+    retry_delay = 2
+    
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5)
+            if response.status_code == 200:
+                models = response.json().get('models', [])
+                return [model['name'] for model in models]
+            else:
+                print(f"API返回错误状态码: {response.status_code}")
+                return ["无法获取本地模型列表"]
+        except ConnectionError:
+            if attempt < max_retries - 1:
+                print(f"连接Ollama服务失败, {retry_delay}秒后重试...")
+                time.sleep(retry_delay)
+            else:
+                print("无法连接到Ollama服务, 请确保服务已启动")
+                return ["无法连接到Ollama服务"]
+        except Exception as e:
+            print(f"获取模型列表时发生错误: {str(e)}")
+            return [f"获取本地模型列表时出错: {str(e)}"]
+
+
+def parse_resume(file_bytes, file_type):
+    """
+    占位函数：解析用户上传的简历（PDF或Word），返回文本内容。
+    可使用 PyMuPDF、PyPDF2、python-docx 等库进行真实解析。
+    """
+    try:
+        if file_type == "pdf":
+            return "【PDF简历示例】这里是解析后的简历文本..."
+        elif file_type in ["docx", "doc"]:
+            return "【Word简历示例】这里是解析后的简历文本..."
+        else:
+            return "暂不支持的文件类型，无法解析。"
+    except Exception:
+        return "解析失败，请检查简历文件格式或内容。"
+
+
+def match_jobs_with_resume(resume_text, job_df, llm_mode, openai_key=None):
+    """
+    将简历与 job_df 进行简单匹配，返回前 10 条最匹配结果 (演示)。
+    实际可改为复杂算法或调用大模型。
+    
+    :param resume_text: 解析后的简历文本
+    :param job_df: 已筛选/处理后的 DataFrame
+    :param llm_mode: "local" 或 "openai"
+    :param openai_key: 若使用 openai，需要提供 key
+    :return: list of dict
+    """
+    if not resume_text or job_df.empty:
+        return []
+
+    # 分词简历文本
+    resume_tokens = set(jieba.lcut(resume_text.lower()))
+    
+    results = []
+    for idx, row in job_df.iterrows():
+        summary = str(row.get('job_summary', '')).lower()
+        salary = str(row.get('salary', '面议'))
+        job_name = str(row.get('position_name', '未知岗位'))
+        comp_name = str(row.get('company_name', '未知公司'))
+        
+        # 分词岗位描述
+        summary_tokens = set(jieba.lcut(summary))
+        
+        # 简易匹配度 = 交集词数 / (岗位关键词总数 + 1)
+        common_tokens = resume_tokens.intersection(summary_tokens)
+        match_score = len(common_tokens) / (len(summary_tokens) + 1)
+        
+        match_reason = f"简历与岗位描述存在 {len(common_tokens)} 个相同关键词"
+        
+        results.append({
+            "job_name": job_name,
+            "company_name": comp_name,
+            "match_score": round(match_score, 2),
+            "match_reason": match_reason,
+            "salary_range": salary,
+            "job_index": idx
+        })
+    
+    # 排序取前 10
+    results.sort(key=lambda x: x["match_score"], reverse=True)
+    return results[:10]
+
+
+def modify_resume_for_job(original_resume, job_description, llm_mode, openai_key=None):
+    """
+    基于 original_resume 与 job_description，生成个性化修改后的简历文本 (演示)。
+    """
+    new_resume = (
+        "【AI修改后的简历示例】\n\n"
+        f"=== 原简历部分内容 ===\n{original_resume[:100]}...\n\n"
+        f"=== 目标岗位需求 ===\n{job_description}\n\n"
+        "=== 优化后简历示例 ===\n"
+        "根据岗位需求匹配技能亮点，突出相关项目经验及技术栈。"
+    )
+    return new_resume
+
 
 # ========== 主 UI 类 ==========
 
@@ -36,19 +151,6 @@ class JobUI:
             st.session_state['openai_key'] = ""
         if 'data_loaded' not in st.session_state:
             st.session_state['data_loaded'] = False
-        # 新增：优化简历相关的状态
-        if 'optimized_resumes' not in st.session_state:
-            st.session_state['optimized_resumes'] = {}
-        if 'button_clicked' not in st.session_state:
-            st.session_state['button_clicked'] = {}
-        if 'job_matches' not in st.session_state:
-            st.session_state['job_matches'] = None
-        if 'matched_jobs_displayed' not in st.session_state:
-            st.session_state['matched_jobs_displayed'] = False
-        if 'current_job_index' not in st.session_state:
-            st.session_state['current_job_index'] = None
-        if 'resume_generation_requested' not in st.session_state:
-            st.session_state['resume_generation_requested'] = {}
 
     def _load_data(self):
         """
@@ -207,18 +309,8 @@ class JobUI:
             if new_text != st.session_state['resume_text']:
                 st.session_state['resume_text'] = new_text
                 st.success("简历上传并解析成功！")
-                
-                # 自动匹配并打分
-                if self.visualizer:
-                    df = self.visualizer.processed_data
-                    job_matches = match_jobs_with_resume(
-                        resume_text=new_text,
-                        job_df=df,
-                        llm_mode=("local" if st.session_state['llm_mode'] == "本地 Ollama" else "openai"),
-                        openai_key=st.session_state.get('openai_key', "")
-                    )
-                    st.session_state['auto_job_matches'] = job_matches
-                    st.session_state['auto_resume_score'] = score_resume(new_text)
+                st.write("简历解析结果：")
+                st.write(new_text[:300] + "..." if len(new_text) > 300 else new_text)
 
     def _show_basic_analysis_tab(self, tab):
         """
@@ -304,40 +396,43 @@ class JobUI:
             if st.session_state['resume_text']:
                 st.write("---")
                 st.subheader("已解析的简历内容")
-                # 移除截断, 直接输出全文
-                st.write(st.session_state['resume_text'])
+                display_text = (
+                    st.session_state['resume_text'][:300] + "..." 
+                    if len(st.session_state['resume_text']) > 300 
+                    else st.session_state['resume_text']
+                )
+                st.write(display_text)
             
             st.warning("请注意保护个人信息隐私，如使用在线模型时需确保已了解相关风险。")
             
-            # 确保 session_state 中存在优化后的简历
-            if 'optimized_resumes' not in st.session_state:
-                st.session_state['optimized_resumes'] = {}
-            
             # 开始匹配
-            if st.button("开始匹配") or st.session_state['matched_jobs_displayed']:
+            if st.button("开始匹配"):
                 if not st.session_state['resume_text']:
                     st.error("请先上传并解析简历文件！")
                 else:
-                    if not st.session_state['matched_jobs_displayed']:
-                        # 只在第一次点击时执行匹配
-                        df = self.visualizer.processed_data
-                        job_matches = match_jobs_with_resume(
-                            resume_text=st.session_state['resume_text'],
-                            job_df=df,
-                            llm_mode=(
-                                "local" if st.session_state['llm_mode'] == "本地 Ollama"
-                                else "openai"
-                            ),
-                            openai_key=st.session_state.get('openai_key', "")
-                        )
-                        st.session_state['job_matches'] = job_matches
-                        st.session_state['matched_jobs_displayed'] = True
+                    # 如果用户选择了OpenAI模式，但没填key
+                    if (st.session_state['llm_mode'] == "OpenAI 在线模型" and 
+                        not st.session_state['openai_key']):
+                        st.error("请输入 OpenAI API Key！")
+                        return
                     
-                    if st.session_state['job_matches']:
+                    st.info("正在进行岗位匹配，请稍候...")
+                    
+                    # 使用 processed_data 进行匹配
+                    df = self.visualizer.processed_data
+                    job_matches = match_jobs_with_resume(
+                        resume_text=st.session_state['resume_text'],
+                        job_df=df,
+                        llm_mode=(
+                            "local" if st.session_state['llm_mode'] == "本地 Ollama"
+                            else "openai"
+                        ),
+                        openai_key=st.session_state.get('openai_key', "")
+                    )
+                    
+                    if job_matches:
                         st.success("已找到前 10 条最匹配岗位：")
-                        for i, match in enumerate(st.session_state['job_matches']):
-                            job_index = match['job_index']
-                            
+                        for i, match in enumerate(job_matches):
                             st.markdown(f"**{i+1}. 岗位名称:** {match['job_name']}")
                             st.markdown(f"**公司名称:** {match['company_name']}")
                             st.markdown(f"**匹配度评分:** {match['match_score']}")
@@ -346,63 +441,32 @@ class JobUI:
                             
                             # 简历修改功能
                             with st.expander(f"🔧 修改简历以匹配岗位: {match['job_name']}"):
-                                modify_button_key = f"modify_{job_index}"
-                                
-                                # 检查是否已经生成过优化简历
-                                already_optimized = job_index in st.session_state['optimized_resumes']
-                                
-                                if st.button(
-                                    "查看优化后的简历" if already_optimized else f"生成针对 {match['job_name']} 的优化简历",
-                                    key=modify_button_key
-                                ):
-                                    st.session_state['resume_generation_requested'][job_index] = True
-                                
-                                # 处理简历生成请求
-                                if st.session_state['resume_generation_requested'].get(job_index):
-                                    if not already_optimized:
-                                        with st.spinner("正在生成优化后的简历..."):
-                                            final_resume = modify_resume_for_job(
-                                                original_resume=st.session_state['resume_text'],
-                                                job_description=(
-                                                    f"{match['job_name']} | {match['company_name']} | "
-                                                    f"薪资: {match['salary_range']}"
-                                                ),
-                                                llm_mode=(
-                                                    "local" if st.session_state['llm_mode'] == "本地 Ollama"
-                                                    else "openai"
-                                                ),
-                                                openai_key=st.session_state.get('openai_key', "")
-                                            )
-                                            st.session_state['optimized_resumes'][job_index] = {
-                                                'resume': final_resume,
-                                                'job_name': match['job_name']
-                                            }
-                                    
-                                    # 显示优化后的简历
+                                if st.button(f"生成针对 {match['job_name']} 的优化简历", key=f"modify_{i}"):
+                                    final_resume = modify_resume_for_job(
+                                        original_resume=st.session_state['resume_text'],
+                                        job_description=(
+                                            f"{match['job_name']} | {match['company_name']} | "
+                                            f"薪资: {match['salary_range']}"
+                                        ),
+                                        llm_mode=(
+                                            "local" if st.session_state['llm_mode'] == "本地 Ollama"
+                                            else "openai"
+                                        ),
+                                        openai_key=st.session_state.get('openai_key', "")
+                                    )
                                     st.write("---")
                                     st.subheader("AI优化后的简历内容:")
-                                    st.write(st.session_state['optimized_resumes'][job_index]['resume'])
+                                    st.write(final_resume)
                                     
-                                    # 下载按钮
-                                    dl_data = st.session_state['optimized_resumes'][job_index]['resume'].encode("utf-8")
+                                    dl_data = final_resume.encode("utf-8")
                                     st.download_button(
                                         label="下载修改后简历 (txt)",
                                         data=dl_data,
-                                        file_name=f"modified_resume_{match['job_name']}.txt",
+                                        file_name="modified_resume.txt",
                                         mime="text/plain"
                                     )
-
-            # 新增简历打分功能
-            if st.button("对简历进行打分"):
-                report = score_resume(st.session_state['resume_text'])
-                st.subheader("简历评分报告")
-                st.write(report)
-                
-            # 显示优化后的简历
-            if 'current_optimized_resume' in st.session_state:
-                st.write("---")
-                st.subheader(f"已优化的简历内容 (针对岗位: {st.session_state['current_job_name']})")
-                st.write(st.session_state['current_optimized_resume'])
+                    else:
+                        st.warning("未找到匹配岗位或简历内容不足。")
 
     def run(self):
         """

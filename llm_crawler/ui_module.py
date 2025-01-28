@@ -8,7 +8,7 @@ import streamlit as st
 
 from data_processor import DataProcessor
 from visualizer import DataVisualizer
-from llm_hr import get_local_models, parse_resume, match_jobs_with_resume, modify_resume_for_job, score_resume
+from llm_hr import LLMHR  # 新增
 
 # ========== 主 UI 类 ==========
 
@@ -23,6 +23,7 @@ class JobUI:
         self._init_session_state()
         self.data_processor = None
         self.visualizer = None
+        self.hr = LLMHR()  # 新增：使用 LLMHR
         
     def _init_session_state(self):
         """初始化会话状态"""
@@ -49,6 +50,8 @@ class JobUI:
             st.session_state['current_job_index'] = None
         if 'resume_generation_requested' not in st.session_state:
             st.session_state['resume_generation_requested'] = {}
+        if 'deepseek_key' not in st.session_state:
+            st.session_state['deepseek_key'] = ""
 
     def _load_data(self):
         """
@@ -91,22 +94,22 @@ class JobUI:
         侧边栏：设置 LLM 相关配置
         """
         st.sidebar.header("AI 设置")
+        mode_options = ["本地 Ollama", "OpenAI 在线模型", "Deepseek 在线模型"]
         llm_mode = st.sidebar.radio(
             "选择 LLM 模式",
-            options=["本地 Ollama", "OpenAI 在线模型"],
-            index=0 if st.session_state['llm_mode'] == "本地 Ollama" else 1
+            options=mode_options,
+            key="llm_mode"  # 直接使用 key 管理选中的值
         )
-        st.session_state['llm_mode'] = llm_mode
 
         if llm_mode == "本地 Ollama":
-            local_models = get_local_models()
+            local_models = self.hr.get_local_models()  # 新引用
             selected_model = st.sidebar.selectbox(
                 "选择本地模型",
                 local_models,
                 key="local_model_select"
             )
             st.session_state['local_model'] = selected_model
-        else:
+        elif llm_mode == "OpenAI 在线模型":
             openai_key = st.sidebar.text_input(
                 "输入 OpenAI API Key (必填)",
                 value=st.session_state.get('openai_key', ""),
@@ -114,6 +117,14 @@ class JobUI:
                 key="openai_key_input"
             )
             st.session_state['openai_key'] = openai_key
+        elif llm_mode == "Deepseek 在线模型":  # 保持与 llm_hr.py 中的判断一致
+            deepseek_key = st.sidebar.text_input(
+                "输入 Deepseek API Key (必填)",
+                value=st.session_state.get('deepseek_key', ""),
+                type="password",
+                key="deepseek_key_input"
+            )
+            st.session_state['deepseek_key'] = deepseek_key
 
     def setup_sidebar(self) -> Dict:
         """
@@ -203,7 +214,7 @@ class JobUI:
             file_type = uploaded_file.name.split('.')[-1].lower()
             file_bytes = uploaded_file.read()
             
-            new_text = parse_resume(file_bytes, file_type)
+            new_text = self.hr.parse_resume(file_bytes, file_type)  # 新引用
             if new_text != st.session_state['resume_text']:
                 st.session_state['resume_text'] = new_text
                 st.success("简历上传并解析成功！")
@@ -211,14 +222,12 @@ class JobUI:
                 # 自动匹配并打分
                 if self.visualizer:
                     df = self.visualizer.processed_data
-                    job_matches = match_jobs_with_resume(
+                    job_matches = self.hr.match_jobs_with_resume(  # 新引用
                         resume_text=new_text,
-                        job_df=df,
-                        llm_mode=("local" if st.session_state['llm_mode'] == "本地 Ollama" else "openai"),
-                        openai_key=st.session_state.get('openai_key', "")
+                        job_df=df
                     )
                     st.session_state['auto_job_matches'] = job_matches
-                    st.session_state['auto_resume_score'] = score_resume(new_text)
+                    st.session_state['auto_resume_score'] = self.hr.score_resume(new_text)  # 新引用
 
     def _show_basic_analysis_tab(self, tab):
         """
@@ -321,14 +330,9 @@ class JobUI:
                     if not st.session_state['matched_jobs_displayed']:
                         # 只在第一次点击时执行匹配
                         df = self.visualizer.processed_data
-                        job_matches = match_jobs_with_resume(
+                        job_matches = self.hr.match_jobs_with_resume(  # 新引用
                             resume_text=st.session_state['resume_text'],
-                            job_df=df,
-                            llm_mode=(
-                                "local" if st.session_state['llm_mode'] == "本地 Ollama"
-                                else "openai"
-                            ),
-                            openai_key=st.session_state.get('openai_key', "")
+                            job_df=df
                         )
                         st.session_state['job_matches'] = job_matches
                         st.session_state['matched_jobs_displayed'] = True
@@ -361,7 +365,7 @@ class JobUI:
                                 if st.session_state['resume_generation_requested'].get(job_index):
                                     if not already_optimized:
                                         with st.spinner("正在生成优化后的简历..."):
-                                            final_resume = modify_resume_for_job(
+                                            final_resume = self.hr.modify_resume_for_job(  # 新引用
                                                 original_resume=st.session_state['resume_text'],
                                                 job_description=(
                                                     f"{match['job_name']} | {match['company_name']} | "
@@ -369,9 +373,11 @@ class JobUI:
                                                 ),
                                                 llm_mode=(
                                                     "local" if st.session_state['llm_mode'] == "本地 Ollama"
-                                                    else "openai"
+                                                    else "openai" if st.session_state['llm_mode'] == "OpenAI 在线模型"
+                                                    else "Deepseek 在线模型"  # 与 llm_hr.py 中保持一致
                                                 ),
-                                                openai_key=st.session_state.get('openai_key', "")
+                                                openai_key=st.session_state.get('openai_key', ""),
+                                                deepseek_key=st.session_state.get('deepseek_key', "")
                                             )
                                             st.session_state['optimized_resumes'][job_index] = {
                                                 'resume': final_resume,
@@ -394,7 +400,7 @@ class JobUI:
 
             # 新增简历打分功能
             if st.button("对简历进行打分"):
-                report = score_resume(st.session_state['resume_text'])
+                report = self.hr.score_resume(st.session_state['resume_text'])  # 新引用
                 st.subheader("简历评分报告")
                 st.write(report)
                 

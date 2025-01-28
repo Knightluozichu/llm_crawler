@@ -7,6 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from data_processor import DataProcessor
+from data_save import JobDatabase
 from visualizer import DataVisualizer
 from llm_hr import LLMHR  # 新增
 
@@ -55,40 +56,94 @@ class JobUI:
 
     def _load_data(self):
         """
-        侧边栏或页面选择 CSV 文件并加载，
-        用 DataProcessor 进行预处理，然后初始化 DataVisualizer。
+        侧边栏或页面选择 CSV 文件或数据库表并加载
         """
-        csv_files = [f for f in self.data_dir.glob('*.csv')]
-        if not csv_files:
-            st.error("数据目录下未找到任何 CSV 文件，请先准备好数据文件。")
-            return None
+        # 选择数据源类型
+        source_type = st.selectbox("选择数据源", ["CSV文件", "数据库表"])
         
-        selected_file = st.selectbox("请选择数据文件", [f.name for f in csv_files])
-        
-        if st.button("加载并分析数据") or st.session_state.get('data_loaded', False):
-            data_file = self.data_dir / selected_file
-            try:
-                if not data_file.exists():
-                    st.error(f"数据文件不存在: {data_file}")
+        if source_type == "CSV文件":
+            csv_files = [f for f in self.data_dir.glob('*.csv')]
+            if not csv_files:
+                st.error("数据目录下未找到任何 CSV 文件，请先准备好数据文件。")
+                return None
+            
+            selected_file = st.selectbox("请选择数据文件", [f.name for f in csv_files])
+            load_button = st.button("加载并分析CSV数据")
+            
+            if load_button or st.session_state.get('data_loaded', False):
+                data_file = self.data_dir / selected_file
+                try:
+                    if not data_file.exists():
+                        st.error(f"数据文件不存在: {data_file}")
+                        return None
+                        
+                    if (not self.data_processor or 
+                        str(data_file) != getattr(self.data_processor, 'current_file', None)):
+                        self.data_processor = DataProcessor(data_file)
+                        self.visualizer = DataVisualizer(self.data_processor)
+                        self.data_processor.current_file = str(data_file)
+                    
+                    st.session_state['data_loaded'] = True
+                    st.success(f"成功加载CSV文件: {selected_file}")
+                    return True
+                    
+                except Exception as e:
+                    st.error(f"加载数据失败: {str(e)}")
                     return None
                     
-                # 只有在未加载或文件变化时才重新加载
-                if (not self.data_processor or 
-                    str(data_file) != getattr(self.data_processor, 'current_file', None)):
-                    self.data_processor = DataProcessor(data_file)
+        else:  # 数据库表处理部分
+            try:
+                st.write("DEBUG: Starting database connection...")
+                db = JobDatabase()
+                
+                st.write("DEBUG: Getting table names...")
+                table_names = db.get_table_names()
+                st.write(f"DEBUG: Found tables: {table_names}")
+                
+                if not table_names:
+                    st.error("数据库中没有有效的表")
+                    return None
+                    
+                st.write("DEBUG: Setting up table selector...")
+                selected_table = st.selectbox(
+                    "选择数据表",
+                    options=table_names,
+                    key="table_selector"
+                )
+                
+                if st.button("加载并分析数据库数据"):
+                    # st.write(f"DEBUG: Loading data from table: {selected_table}")
+                    table_data = db.get_table_data(selected_table)
+                    # st.write(f"DEBUG: Table data type: {type(table_data)}")
+                    # st.write(f"DEBUG: Table data preview: {table_data[:5] if table_data else None}")
+                    
+                    if not table_data:
+                        st.error(f"表 {selected_table} 为空或读取失败")
+                        return None
+                        
+                    columns = ['id', 'position_name', 'company_name', 'salary', 'work_city', 
+                              'work_exp', 'education', 'company_size', 'company_type', 
+                              'industry', 'position_url', 'job_summary', 'welfare', 'salary_count']
+                    
+                    # st.write("DEBUG: Creating DataFrame...")
+                    df = pd.DataFrame(table_data, columns=columns)
+                    # st.write(f"DEBUG: DataFrame shape: {df.shape}")
+                    
+                    # st.write("DEBUG: Initializing DataProcessor and DataVisualizer...")
+                    # Create a temporary CSV file to work with DataProcessor
+                    temp_csv = self.data_dir / 'temp_db_data.csv'
+                    df.to_csv(temp_csv, index=False)
+                    self.data_processor = DataProcessor(temp_csv)
                     self.visualizer = DataVisualizer(self.data_processor)
-                    # 保存当前文件路径以便后续比较
-                    self.data_processor.current_file = str(data_file)
-                
-                st.session_state['data_loaded'] = True
-                st.success(f"成功加载数据文件: {selected_file}")
-                
-                return True
-                
+                    # self.visualizer.processed_data = df
+                    st.session_state['data_loaded'] = True
+                    st.success(f"成功加载数据表: {selected_table}")
+                    return True
+                    
             except Exception as e:
-                st.error(f"加载数据失败: {str(e)}")
+                st.error(f"加载数据库失败: {str(e)}")
                 return None
-        
+            
     def _setup_llm_settings(self):
         """
         侧边栏：设置 LLM 相关配置

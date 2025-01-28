@@ -15,6 +15,21 @@ import atexit
 # 1. 通用功能函数区
 ######################################
 
+def update_append_mode():
+    """更新配置状态"""
+    if 'append_to_jobs' not in st.session_state:
+        st.session_state.append_to_jobs = True
+
+def initialize_append_mode():
+    update_append_mode()
+    st.session_state.append_to_jobs = st.radio(
+        "数据保存模式",
+        ["汇入jobs总表", "保存为单独文件"],
+        index=0 if st.session_state.append_to_jobs else 1,
+        key="append_mode"
+    )
+    st.session_state.append_to_jobs = (st.session_state.append_mode == "汇入jobs总表")
+
 def quit_all_drivers():
     """退出所有活跃的driver"""
     try:
@@ -335,6 +350,7 @@ else:
 
 if st.button("抓取数据配置", key="crawler_config_btn") or st.session_state.show_crawler_config:
     st.session_state.show_crawler_config = True
+    initialize_append_mode()
     if not st.session_state.generated_link:
         st.warning("请先生成链接，再点击此按钮")
     else:
@@ -398,7 +414,8 @@ if st.button("抓取数据配置", key="crawler_config_btn") or st.session_state
                             max_pages=st.session_state.extract_pages,
                             existing_driver=crawler_driver,
                             city=city,
-                            keyword=keyword
+                            keyword=keyword,
+                            table_name= "jobs" if st.session_state.append_to_jobs else f"{city}_{keyword}_jobs"  # 保存到jobs表
                         )
                         
                         status_text.success("✅ 数据抓取完成")

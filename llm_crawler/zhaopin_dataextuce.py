@@ -8,6 +8,7 @@ from pathlib import Path
 import logging
 import os
 import streamlit as st
+from data_save import JobDatabase
 
 # # 对连接进行缓存源网页内容
 # def cache_page(url):
@@ -39,7 +40,7 @@ def allPage(url):
     driver.quit()
     return countPage
 
-def cache_all_page(url: str, max_pages: int = 1, existing_driver=None,city=None,keyword=None):
+def cache_all_page(url: str, max_pages: int = 1, existing_driver=None, city=None, keyword=None, table_name=None):
     """抓取指定页数的数据"""
     driver = existing_driver
     should_quit = False
@@ -64,7 +65,11 @@ def cache_all_page(url: str, max_pages: int = 1, existing_driver=None,city=None,
             df = extract_data(page_source)
             
             if not df.empty:
-                save_to_csv(df, f'{city}_{keyword}.csv')
+                # save_to_csv(df, f'{city}_{keyword}.csv')
+                if table_name:
+                    save_to_database(df, table_name)
+                else:
+                    save_to_database(df)  # 使用默认'jobs'表
             else:
                 st.warning(f"第 {page} 页数据为空")
     
@@ -174,6 +179,47 @@ def analyze_data(df):
         'company_type_stats': df['company_type'].value_counts().to_dict()
     }
     return analysis
+
+def save_to_database(df, table_name='jobs'):
+    """
+    Save job data to SQLite database
+    Args:
+        df: DataFrame containing job information
+        table_name: Name of the table to save data to (default: 'jobs')
+    """
+    
+    # Initialize database
+    db = JobDatabase()
+    db.create_table(table_name)
+    
+    # Insert each row into database
+    for _, row in df.iterrows():
+        try:
+            db.insert_job(
+                table_name=table_name,  # 添加 table_name 参数
+                position_name=row['position_name'],
+                company_name=row['company_name'], 
+                salary=row['salary'],
+                work_city=row['work_city'],
+                work_exp=row['work_exp'],
+                education=row['education'],
+                company_size=row['company_size'],
+                company_type=row['company_type'],
+                industry=row['industry'],
+                position_url=row['position_url'],
+                job_summary=row['job_summary'],
+                welfare=row['welfare'],
+                salary_count=row['salary_count']
+            )
+            print(f"Added job: {row['position_name']} at {row['company_name']}")
+            if st:
+                st.write(f"Added job: {row['position_name']} at {row['company_name']}")
+                
+        except Exception as e:
+            print(f"Error saving job to database: {e}")
+            if st:
+                st.error(f"Error saving job to database: {e}")
+
 
 # 添加命令行入口
 if __name__ == '__main__':

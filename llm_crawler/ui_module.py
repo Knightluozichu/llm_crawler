@@ -22,8 +22,12 @@ class JobUI:
         self.data_root = data_root
         self.data_dir = data_root / 'data'
         self._init_session_state()
-        self.data_processor = None
-        self.visualizer = None
+        
+        # 修复关键点：将 data_processor / visualizer 从 session_state 中读取
+        # 这样在 Streamlit 重新运行时也能保留已经加载的处理器和可视化对象
+        self.data_processor = st.session_state['data_processor']
+        self.visualizer = st.session_state['visualizer']
+        
         self.hr = LLMHR()  # 新增：使用 LLMHR
         
     def _init_session_state(self):
@@ -54,10 +58,20 @@ class JobUI:
         if 'deepseek_key' not in st.session_state:
             st.session_state['deepseek_key'] = ""
 
+        # 修复关键点：为 data_processor / visualizer 预留 session_state 空位
+        if 'data_processor' not in st.session_state:
+            st.session_state['data_processor'] = None
+        if 'visualizer' not in st.session_state:
+            st.session_state['visualizer'] = None
+
     def _load_data(self):
         """
         侧边栏或页面选择 CSV 文件或数据库表并加载
         """
+        # 如果之前已加载过数据，则优先显示“已经加载”的状态，避免重复初始化
+        if st.session_state['data_loaded']:
+            st.info("数据已加载。若需重新加载，请重新选择并点击按钮。")
+        
         # 选择数据源类型
         source_type = st.selectbox("选择数据源", ["CSV文件", "数据库表"])
         
@@ -70,18 +84,20 @@ class JobUI:
             selected_file = st.selectbox("请选择数据文件", [f.name for f in csv_files])
             load_button = st.button("加载并分析CSV数据")
             
-            if load_button or st.session_state.get('data_loaded', False):
+            if load_button:
                 data_file = self.data_dir / selected_file
                 try:
                     if not data_file.exists():
                         st.error(f"数据文件不存在: {data_file}")
                         return None
                         
-                    if (not self.data_processor or 
-                        str(data_file) != getattr(self.data_processor, 'current_file', None)):
-                        self.data_processor = DataProcessor(data_file)
-                        self.visualizer = DataVisualizer(self.data_processor)
-                        self.data_processor.current_file = str(data_file)
+                    # 重新加载或初次加载时，创建新的 processor & visualizer
+                    self.data_processor = DataProcessor(data_file)
+                    self.visualizer = DataVisualizer(self.data_processor)
+                    
+                    # 关键：存入 session_state，以便 Streamlit 重跑时能够保留
+                    st.session_state['data_processor'] = self.data_processor
+                    st.session_state['visualizer'] = self.visualizer
                     
                     st.session_state['data_loaded'] = True
                     st.success(f"成功加载CSV文件: {selected_file}")
@@ -113,10 +129,7 @@ class JobUI:
                 )
                 
                 if st.button("加载并分析数据库数据"):
-                    # st.write(f"DEBUG: Loading data from table: {selected_table}")
                     table_data = db.get_table_data(selected_table)
-                    # st.write(f"DEBUG: Table data type: {type(table_data)}")
-                    # st.write(f"DEBUG: Table data preview: {table_data[:5] if table_data else None}")
                     
                     if not table_data:
                         st.error(f"表 {selected_table} 为空或读取失败")
@@ -126,18 +139,18 @@ class JobUI:
                               'work_exp', 'education', 'company_size', 'company_type', 
                               'industry', 'position_url', 'job_summary', 'welfare', 'salary_count']
                     
-                    # st.write("DEBUG: Creating DataFrame...")
                     df = pd.DataFrame(table_data, columns=columns)
-                    # st.write(f"DEBUG: DataFrame shape: {df.shape}")
                     
-                    # st.write("DEBUG: Initializing DataProcessor and DataVisualizer...")
-                    # Create a temporary CSV file to work with DataProcessor
+                    # 将数据库读取到的内容暂存成一个临时 CSV，传给 DataProcessor
                     temp_csv = self.data_dir / 'temp_db_data.csv'
                     df.to_csv(temp_csv, index=False)
+                    
                     self.data_processor = DataProcessor(temp_csv)
                     self.visualizer = DataVisualizer(self.data_processor)
-                    # self.visualizer.processed_data = df
-                    # 将加载的数据存储在 session_state 中
+                    
+                    st.session_state['data_processor'] = self.data_processor
+                    st.session_state['visualizer'] = self.visualizer
+                    
                     st.session_state['data_loaded'] = True
                     st.session_state['selected_table'] = selected_table
                     st.session_state['table_data'] = table_data
@@ -148,6 +161,9 @@ class JobUI:
                 st.error(f"加载数据库失败: {str(e)}")
                 return None
             
+        # 如果什么都没做或没点按钮，不返回成功标志
+        return None
+
     def _setup_llm_settings(self):
         """
         侧边栏：设置 LLM 相关配置
@@ -485,8 +501,13 @@ class JobUI:
         # 第一步：加载数据（如果需要）
         load_result = self._load_data()
         
-        # 只有成功加载数据后才显示后续内容
+        # 只有成功加载数据或 session_state 已指示 data_loaded 才显示后续内容
         if load_result or st.session_state.get('data_loaded', False):
+            # 如果本次 _load_data() 执行后才创建了 data_processor / visualizer，需要再同步到当前实例里
+            # （防止当前 self.data_processor / self.visualizer 还是旧值）
+            self.data_processor = st.session_state['data_processor']
+            self.visualizer = st.session_state['visualizer']
+            
             # 第二步：设置 LLM 配置（侧边栏）
             self._setup_llm_settings()
             

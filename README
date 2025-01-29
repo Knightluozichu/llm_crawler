@@ -1,0 +1,46 @@
+
+## o1_zhilian_ui.py (zlzp数据抓取说明)
+
+该脚本主要封装了在zlzp网站上进行自动化登录、生成搜索链接以及批量抓取职位信息的流程。  
+结合浏览器自动化库 Selenium，可在指定页数范围内采集招聘职位数据，并选择保存至数据库表或单独文件。  
+
+# AI 岗位分析可视化 & 求职系统
+
+本项目提供了一个基于 Streamlit 的可视化与智能求职平台，集成 AI 简历匹配与定制化功能，旨在帮助用户完成岗位数据分析与科学求职。
+
+## 功能特点
+
+1. 数据加载：支持从 CSV 文件或 SQLite 数据库加载招聘信息。  
+2. 数据分析：内置数据可视化与洞察模块，可查看薪资分布、学历与经验需求、公司类型构成等要点。  
+3. 求职中心：通过上传简历进行岗位匹配，并借助 AI 模型（本地 Ollama / OpenAI / Deepseek）定制并优化简历内容。
+
+## 核心文件概览
+
+- `ui_module.py`：Streamlit 前端主要逻辑，负责数据加载、可视化分析与求职功能。  
+- `data_processor.py`：数据预处理与筛选逻辑，如清洗薪资、解析经验与学历等。  
+- `data_save.py`：数据库操作类（JobDatabase），包括表的创建、数据插入与获取。  
+- `llm_hr.py`：AI 模型调用与简历优化逻辑，封装本地及在线模型接口。  
+- `kw.py`：关键字混淆编码工具。  
+- `requirements.txt`：项目的依赖库清单，请结合实际环境调整版本号。  
+
+## 安装与运行
+
+1. 安装依赖（请确保已安装 Python 3.7+）：
+   ```bash
+   pip install -r requirements.txt
+   ```
+2. 运行应用：
+   ```bash
+   streamlit run llm_crawler/ui_module.py
+   ```
+   ```bash
+    streamlit run llm_crawler/o1_zhilian_ui.py
+    ```
+
+3. 打开浏览器访问对应的本地端口（默认 http://localhost:8501），即可使用本系统进行数据分析与求职辅助。
+
+## 注意事项
+
+- 请在 `requirements.txt` 中确认并修改适合自己 Python 环境的依赖版本。
+- 如使用本地 Ollama 模型，需要提前启动 Ollama API 服务并确保可访问。
+- 在线模型可能产生网络请求，请注意在实际环境中保护隐私与密钥安全。

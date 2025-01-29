@@ -163,7 +163,7 @@ def validate_option_data(data, field_name):
         return [("0", "不限")]
 
 # 页面布局
-st.title("智联招聘链接生成器")
+st.title("zlzp链接生成器")
 
 # 基本搜索条件
 st.subheader("基本搜索条件")

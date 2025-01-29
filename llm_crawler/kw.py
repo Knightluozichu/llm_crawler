@@ -38,6 +38,6 @@ def encode_kw(keyword: str) -> str:
 
 if __name__ == "__main__":
     # 测试示例
-    tests = ["llm", "python", "java 开发", "智联招聘","元宇宙","虚拟"]
+    tests = ["llm", "python", "java 开发", "zlzp","元宇宙","虚拟"]
     for txt in tests:
         print(txt, "=>", encode_kw(txt))

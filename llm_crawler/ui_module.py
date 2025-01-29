@@ -92,6 +92,7 @@ class JobUI:
                     return None
                     
         else:  # 数据库表处理部分
+
             try:
                 st.write("DEBUG: Starting database connection...")
                 db = JobDatabase()
@@ -136,7 +137,10 @@ class JobUI:
                     self.data_processor = DataProcessor(temp_csv)
                     self.visualizer = DataVisualizer(self.data_processor)
                     # self.visualizer.processed_data = df
+                    # 将加载的数据存储在 session_state 中
                     st.session_state['data_loaded'] = True
+                    st.session_state['selected_table'] = selected_table
+                    st.session_state['table_data'] = table_data
                     st.success(f"成功加载数据表: {selected_table}")
                     return True
                     

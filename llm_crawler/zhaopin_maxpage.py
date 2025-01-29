@@ -10,7 +10,7 @@ def test_page_input(url: str, test_page: int = 99999, existing_driver=None) -> t
     测试页码输入框功能
     
     Args:
-        url: 智联招聘搜索页面URL
+        url: zlzp搜索页面URL
         test_page: 要测试输入的页码值
         existing_driver: 复用现有的driver
         

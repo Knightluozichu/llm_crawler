@@ -4041,7 +4041,7 @@
             "campusRootOrgInfo": null,
             "canBeRegular": false,
             "canRemoteInternship": false,
-            "cardCustomJson": "{\"address\":\"北京 朝阳 望京\",\"companyName\":\"智联招聘\",\"locationType\":\"5\",\"publishNew\":1,\"salary60\":\"6-8千\",\"strengthLabel\":\"互联网100强\"}",
+            "cardCustomJson": "{\"address\":\"北京 朝阳 望京\",\"companyName\":\"zlzp\",\"locationType\":\"5\",\"publishNew\":1,\"salary60\":\"6-8千\",\"strengthLabel\":\"互联网100强\"}",
             "cardType": 1,
             "chatWindow": 1,
             "cityDistrict": "朝阳",
@@ -4059,7 +4059,7 @@
             },
             "companyId": 12001997,
             "companyLogo": "https://storage-public.zhaopin.cn/da/org/logo/1637658752737270178/58d860b0-c2ee-4821-9153-5f77fc30252b1423242601743021268.jpg",
-            "companyName": "智联招聘",
+            "companyName": "zlzp",
             "companyNumber": "CZ120019970",
             "companyRootId": 12001997,
             "companyScaleTypeTagsNew": [

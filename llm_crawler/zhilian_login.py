@@ -28,7 +28,7 @@ def get_logged_in_driver(url=None, cookies_file="cookies.pkl", chrome_options=No
     获取一个已登录的WebDriver实例
     
     Args:
-        url (str): 目标URL，如果为None则使用智联招聘首页
+        url (str): 目标URL，如果为None则使用zlzp首页
         cookies_file (str): Cookie文件保存路径
         chrome_options (Options): Chrome浏览器配置，如果为None则使用默认配置
     

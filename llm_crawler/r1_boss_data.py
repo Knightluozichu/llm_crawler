@@ -254,4 +254,4 @@ class BossZPCrawler:
 
 if __name__ == "__main__":
     crawler = BossZPCrawler(headless=False)  # 调试时可关闭无头模式
-    crawler.execute_crawl(max_pages=20)
+    crawler.execute_crawl(max_pages=10)

@@ -9,9 +9,8 @@ import streamlit as st
 from data_processor import DataProcessor
 from data_save import JobDatabase
 from visualizer import DataVisualizer
-from llm_hr import LLMHR  
+from llm_hr import LLMHR
 
-# ========== 主 UI 类 ==========
 
 class JobUI:
     """
@@ -22,259 +21,177 @@ class JobUI:
         self.data_root = data_root
         self.data_dir = data_root / 'data'
         self._init_session_state()
-        
-        # 修复关键点：将 data_processor / visualizer 从 session_state 中读取
-        # 这样在 Streamlit 重新运行时也能保留已经加载的处理器和可视化对象
+
         self.data_processor = st.session_state['data_processor']
         self.visualizer = st.session_state['visualizer']
-        
-        self.hr = LLMHR()  # 新增：使用 LLMHR
-        
-    def _init_session_state(self):
-        """初始化会话状态"""
-        if 'resume_text' not in st.session_state:
-            st.session_state['resume_text'] = ""
-        if 'llm_mode' not in st.session_state:
-            st.session_state['llm_mode'] = "本地 Ollama"
-        if 'local_model' not in st.session_state:
-            st.session_state['local_model'] = ""
-        if 'openai_key' not in st.session_state:
-            st.session_state['openai_key'] = ""
-        if 'data_loaded' not in st.session_state:
-            st.session_state['data_loaded'] = False
-        # 新增：优化简历相关的状态
-        if 'optimized_resumes' not in st.session_state:
-            st.session_state['optimized_resumes'] = {}
-        if 'button_clicked' not in st.session_state:
-            st.session_state['button_clicked'] = {}
-        if 'job_matches' not in st.session_state:
-            st.session_state['job_matches'] = None
-        if 'matched_jobs_displayed' not in st.session_state:
-            st.session_state['matched_jobs_displayed'] = False
-        if 'current_job_index' not in st.session_state:
-            st.session_state['current_job_index'] = None
-        if 'resume_generation_requested' not in st.session_state:
-            st.session_state['resume_generation_requested'] = {}
-        if 'deepseek_key' not in st.session_state:
-            st.session_state['deepseek_key'] = ""
+        self.hr = LLMHR()
 
-        # 修复关键点：为 data_processor / visualizer 预留 session_state 空位
-        if 'data_processor' not in st.session_state:
-            st.session_state['data_processor'] = None
-        if 'visualizer' not in st.session_state:
-            st.session_state['visualizer'] = None
+    def _init_session_state(self):
+        default_states = {
+            'resume_text': "",
+            'llm_mode': "本地 Ollama",
+            'local_model': "",
+            'openai_key': "",
+            'data_loaded': False,
+            'optimized_resumes': {},
+            'button_clicked': {},
+            'job_matches': None,
+            'matched_jobs_displayed': False,
+            'current_job_index': None,
+            'resume_generation_requested': {},
+            'deepseek_key': "",
+            'data_processor': None,
+            'visualizer': None
+        }
+        for k, v in default_states.items():
+            if k not in st.session_state:
+                st.session_state[k] = v
 
     def _load_data(self):
-        """
-        侧边栏或页面选择 CSV 文件或数据库表并加载
-        """
-        # 如果之前已加载过数据，则优先显示“已经加载”的状态，避免重复初始化
         if st.session_state['data_loaded']:
             st.info("数据已加载。若需重新加载，请重新选择并点击按钮。")
-        
-        # 选择数据源类型
+
         source_type = st.selectbox("选择数据源", ["CSV文件", "数据库表"])
-        
         if source_type == "CSV文件":
-            csv_files = [f for f in self.data_dir.glob('*.csv')]
+            csv_files = list(self.data_dir.glob('*.csv'))
             if not csv_files:
                 st.error("数据目录下未找到任何 CSV 文件，请先准备好数据文件。")
                 return None
-            
+
             selected_file = st.selectbox("请选择数据文件", [f.name for f in csv_files])
-            load_button = st.button("加载并分析CSV数据")
-            
-            if load_button:
+            if st.button("加载并分析CSV数据"):
                 data_file = self.data_dir / selected_file
                 try:
                     if not data_file.exists():
                         st.error(f"数据文件不存在: {data_file}")
                         return None
-                        
-                    # 重新加载或初次加载时，创建新的 processor & visualizer
+
                     self.data_processor = DataProcessor(data_file)
                     self.visualizer = DataVisualizer(self.data_processor)
-                    
-                    # 关键：存入 session_state，以便 Streamlit 重跑时能够保留
                     st.session_state['data_processor'] = self.data_processor
                     st.session_state['visualizer'] = self.visualizer
-                    
                     st.session_state['data_loaded'] = True
+
                     st.success(f"成功加载CSV文件: {selected_file}")
                     return True
-                    
+
                 except Exception as e:
                     st.error(f"加载数据失败: {str(e)}")
                     return None
-                    
-        else:  # 数据库表处理部分
-
+        else:
             try:
-                st.write("DEBUG: Starting database connection...")
                 db = JobDatabase()
-                
-                st.write("DEBUG: Getting table names...")
                 table_names = db.get_table_names()
-                st.write(f"DEBUG: Found tables: {table_names}")
-                
                 if not table_names:
                     st.error("数据库中没有有效的表")
                     return None
-                    
-                st.write("DEBUG: Setting up table selector...")
-                selected_table = st.selectbox(
-                    "选择数据表",
-                    options=table_names,
-                    key="table_selector"
-                )
-                
+
+                selected_table = st.selectbox("选择数据表", options=table_names)
                 if st.button("加载并分析数据库数据"):
                     table_data = db.get_table_data(selected_table)
-                    
                     if not table_data:
                         st.error(f"表 {selected_table} 为空或读取失败")
                         return None
-                        
-                    columns = ['id', 'position_name', 'company_name', 'salary', 'work_city', 
-                              'work_exp', 'education', 'company_size', 'company_type', 
-                              'industry', 'position_url', 'job_summary', 'welfare', 'salary_count']
-                    
+
+                    columns = [
+                        'id', 'position_name', 'company_name', 'salary', 'work_city',
+                        'work_exp', 'education', 'company_size', 'company_type',
+                        'industry', 'position_url', 'job_summary', 'welfare', 'salary_count'
+                    ]
                     df = pd.DataFrame(table_data, columns=columns)
-                    
-                    # 将数据库读取到的内容暂存成一个临时 CSV，传给 DataProcessor
+
                     temp_csv = self.data_dir / 'temp_db_data.csv'
                     df.to_csv(temp_csv, index=False)
-                    
+
                     self.data_processor = DataProcessor(temp_csv)
                     self.visualizer = DataVisualizer(self.data_processor)
-                    
                     st.session_state['data_processor'] = self.data_processor
                     st.session_state['visualizer'] = self.visualizer
-                    
                     st.session_state['data_loaded'] = True
                     st.session_state['selected_table'] = selected_table
                     st.session_state['table_data'] = table_data
+
                     st.success(f"成功加载数据表: {selected_table}")
                     return True
-                    
+
             except Exception as e:
                 st.error(f"加载数据库失败: {str(e)}")
                 return None
-            
-        # 如果什么都没做或没点按钮，不返回成功标志
+
         return None
 
     def _setup_llm_settings(self):
-        """
-        侧边栏：设置 LLM 相关配置
-        """
         st.sidebar.header("AI 设置")
         mode_options = ["本地 Ollama", "OpenAI 在线模型", "Deepseek 在线模型"]
-        llm_mode = st.sidebar.radio(
-            "选择 LLM 模式",
-            options=mode_options,
-            key="llm_mode"  # 直接使用 key 管理选中的值
-        )
+        llm_mode = st.sidebar.radio("选择 LLM 模式", options=mode_options, key="llm_mode")
 
         if llm_mode == "本地 Ollama":
-            local_models = self.hr.get_local_models()  # 新引用
-            selected_model = st.sidebar.selectbox(
-                "选择本地模型",
-                local_models,
-                key="local_model_select"
-            )
+            local_models = self.hr.get_local_models()
+            selected_model = st.sidebar.selectbox("选择本地模型", local_models, key="local_model_select")
             st.session_state['local_model'] = selected_model
         elif llm_mode == "OpenAI 在线模型":
             openai_key = st.sidebar.text_input(
                 "输入 OpenAI API Key (必填)",
                 value=st.session_state.get('openai_key', ""),
-                type="password",
-                key="openai_key_input"
+                type="password"
             )
             st.session_state['openai_key'] = openai_key
-        elif llm_mode == "Deepseek 在线模型":  # 保持与 llm_hr.py 中的判断一致
+        else:
             deepseek_key = st.sidebar.text_input(
                 "输入 Deepseek API Key (必填)",
                 value=st.session_state.get('deepseek_key', ""),
-                type="password",
-                key="deepseek_key_input"
+                type="password"
             )
             st.session_state['deepseek_key'] = deepseek_key
 
     def setup_sidebar(self) -> Dict:
-        """
-        侧边栏：设置多项筛选条件并返回筛选器字典。
-        - 薪资范围 (min, max) (单位：千元)
-        - work_exp (最大年限)
-        - education (0~4)
-        - company_type (多选)
-        - welfare_tags (多选)
-        
-        :return: dict 格式的各项筛选条件
-        """
         st.sidebar.header("筛选条件")
-        
-            
+
         if not (self.data_processor and self.visualizer):
             return {}
-        
+
         df = self.visualizer.processed_data
-        
-        # 修改薪资范围处理逻辑
+
         if len(df) > 0:
             min_val = max(0, int(df['avg_salary'].min()))
             max_val = max(50, int(df['avg_salary'].max()))
-            # 确保最小值和最大值不相等
             if min_val == max_val:
-                max_val = min_val + 10  # 如果相等，则最大值加10
+                max_val = min_val + 10
         else:
-            min_val = 0
-            max_val = 50  # 设置默认范围
-        
+            min_val, max_val = 0, 50
+
         salary_range = st.sidebar.slider(
             "薪资范围 (千元)",
             min_value=min_val,
             max_value=max_val,
             value=(min_val, max_val)
         )
-        
-        # 工作经验 (work_exp)
+
         max_exp = int(df['work_exp'].max()) if len(df) else 10
-        selected_exp = st.sidebar.slider(
-            "最大工作经验 (年)",
-            min_value=0,
-            max_value=max_exp,
-            value=max_exp
-        )
-        
-        # 学历要求
+        selected_exp = st.sidebar.slider("最大工作经验 (年)", min_value=0, max_value=max_exp, value=max_exp)
+
         edu_options = ['不限', '大专', '本科', '硕士', '博士']
-        education = st.sidebar.select_slider(
-            "最低学历要求",
-            options=edu_options,
-            value='不限'
-        )
+        education = st.sidebar.select_slider("最低学历要求", options=edu_options, value='不限')
         education_idx = edu_options.index(education)
-        
-        # 公司类型
+
         company_types = df['company_type'].unique().tolist()
         selected_company_types = st.sidebar.multiselect(
             "公司类型",
             options=company_types,
             default=company_types
         )
-        
-        # 福利标签
+
         all_welfare_tags = []
-        for tags in df['welfare_tags']:
-            all_welfare_tags.extend(tags)
+        for tags in df.get('welfare_tags', []):
+            if isinstance(tags, list):
+                all_welfare_tags.extend(tags)
         welfare_options = list(set(all_welfare_tags))
         selected_welfare_tags = st.sidebar.multiselect(
             "福利标签",
             options=welfare_options,
             default=[]
         )
-        
+
         return {
             'salary_range': salary_range,
             'work_exp': selected_exp,
@@ -284,95 +201,66 @@ class JobUI:
         }
 
     def _handle_resume_upload(self):
-        """
-        页面中：上传并解析简历文件（PDF、Word）。
-        解析后存入 session_state['resume_text']。
-        """
-        uploaded_file = st.file_uploader(
-            "上传简历（PDF或Word）",
-            type=["pdf", "doc", "docx"],
-            key="resume_uploader"
-        )
-        
+        uploaded_file = st.file_uploader("上传简历（PDF或Word）", type=["pdf", "doc", "docx"])
         if uploaded_file is not None:
             file_type = uploaded_file.name.split('.')[-1].lower()
             file_bytes = uploaded_file.read()
-            
-            new_text = self.hr.parse_resume(file_bytes, file_type)  # 新引用
+            new_text = self.hr.parse_resume(file_bytes, file_type)
+
             if new_text != st.session_state['resume_text']:
                 st.session_state['resume_text'] = new_text
                 st.success("简历上传并解析成功！")
-                
-                # 自动匹配并打分
-                if self.visualizer:
-                    df = self.visualizer.processed_data
-                    job_matches = self.hr.match_jobs_with_resume(  # 新引用
-                        resume_text=new_text,
-                        job_df=df
-                    )
-                    st.session_state['auto_job_matches'] = job_matches
-                    st.session_state['auto_resume_score'] = self.hr.score_resume(new_text)  # 新引用
 
     def _show_basic_analysis_tab(self, tab):
-        """
-        选项卡 1：显示基础可视化分析，包括薪资、学历、经验、公司类型分布等。
-        """
         with tab:
             st.subheader("基础分析")
             if not self.visualizer:
                 st.warning("请先加载数据")
                 return
-            
-            st.plotly_chart(self.visualizer.plot_salary_distribution(), use_container_width=True)
-            
+
+            st.plotly_chart(self.visualizer.plot_salary_distribution(), use_container_width=True,
+                            key="basic_salary_dist")
+
             col1, col2 = st.columns(2)
             with col1:
-                st.plotly_chart(self.visualizer.plot_education_pie(), use_container_width=True)
+                st.plotly_chart(self.visualizer.plot_education_pie(), use_container_width=True,
+                                key="basic_education_pie")
             with col2:
-                st.plotly_chart(self.visualizer.plot_experience_bar(), use_container_width=True)
-                
+                st.plotly_chart(self.visualizer.plot_experience_bar(), use_container_width=True,
+                                key="basic_experience_bar")
+
             col3, col4 = st.columns(2)
             with col3:
-                st.plotly_chart(self.visualizer.plot_company_type_pie(), use_container_width=True)
+                st.plotly_chart(self.visualizer.plot_company_type_pie(), use_container_width=True,
+                                key="basic_company_type_pie")
             with col4:
-                st.info("更多图表可在此扩展，如行业分布等...")
-            
-            wordcloud_data = self.visualizer.generate_job_wordcloud()
+                st.info("更多图表可在此扩展...")
+
+            wordcloud_data = self.visualizer.plot_wordcloud()
             if wordcloud_data:
-                st.image(
-                    BytesIO(base64.b64decode(wordcloud_data)), 
-                    caption='职位描述关键词云图'
-                )
+                st.image(BytesIO(base64.b64decode(wordcloud_data)), caption='职位描述关键词云图')
             else:
                 st.warning("无法生成词云，可能无有效职位描述数据")
 
     def _show_insights_tab(self, tab):
-        """
-        选项卡 2：显示岗位洞察报表，包括薪资、关键词等关键指标。
-        """
         with tab:
             st.subheader("岗位洞察报表")
             if not self.visualizer:
                 st.warning("请先加载数据")
                 return
-            
+
             insights = self.visualizer.generate_job_insights()
-            
-            # 展示关键薪资指标
             col1, col2, col3 = st.columns(3)
             col1.metric("平均薪资", f"{insights['salary']['avg']} 千元")
             col2.metric("最低薪资", f"{insights['salary']['min']} 千元")
             col3.metric("最高薪资", f"{insights['salary']['max']} 千元")
-            
-            # 展示高频关键词
+
             st.write("职位描述高频关键词 TOP 10：", ", ".join(insights['keywords']))
-            
-            # 绘制洞察可视化
-            fig_salary, fig_keywords = self.visualizer.plot_insights_summary(insights)
-            st.plotly_chart(fig_salary, use_container_width=True)
-            st.plotly_chart(fig_keywords, use_container_width=True)
-            
-            # 导出洞察
+
+            fig_salary, fig_exp = self.visualizer.plot_insights_summary(insights)
+            st.plotly_chart(fig_salary, use_container_width=True, key="insights_salary_dist")
+            st.plotly_chart(fig_exp, use_container_width=True, key="insights_exp_bar")
+
             if st.button("导出洞察报表"):
                 df_insights = pd.DataFrame.from_dict(insights, orient='index')
                 csv_str = df_insights.to_csv()
@@ -384,72 +272,54 @@ class JobUI:
                 )
 
     def _show_job_search_tab(self, tab):
-        """
-        选项卡 3：求职功能，包括简历上传、匹配与简历定制化修改。
-        """
         with tab:
             st.subheader("求职中心：简历匹配与定制化修改")
-            
-            # 上传简历
             self._handle_resume_upload()
-            
-            # 若已上传简历，显示当前简历概览
+
             if st.session_state['resume_text']:
                 st.write("---")
                 st.subheader("已解析的简历内容")
-                # 移除截断, 直接输出全文
                 st.write(st.session_state['resume_text'])
-            
+
             st.warning("请注意保护个人信息隐私，如使用在线模型时需确保已了解相关风险。")
-            
-            # 确保 session_state 中存在优化后的简历
-            if 'optimized_resumes' not in st.session_state:
-                st.session_state['optimized_resumes'] = {}
-            
-            # 开始匹配
+
             if st.button("开始匹配") or st.session_state['matched_jobs_displayed']:
                 if not st.session_state['resume_text']:
                     st.error("请先上传并解析简历文件！")
                 else:
                     if not st.session_state['matched_jobs_displayed']:
-                        # 只在第一次点击时执行匹配
                         df = self.visualizer.processed_data
-                        job_matches = self.hr.match_jobs_with_resume(  # 新引用
+                        job_matches = self.hr.match_jobs_with_resume(
                             resume_text=st.session_state['resume_text'],
                             job_df=df
                         )
                         st.session_state['job_matches'] = job_matches
                         st.session_state['matched_jobs_displayed'] = True
-                    
+
                     if st.session_state['job_matches']:
                         st.success("已找到前 10 条最匹配岗位：")
                         for i, match in enumerate(st.session_state['job_matches']):
                             job_index = match['job_index']
-                            
                             st.markdown(f"**{i+1}. 岗位名称:** {match['job_name']}")
                             st.markdown(f"**公司名称:** {match['company_name']}")
                             st.markdown(f"**匹配度评分:** {match['match_score']}")
                             st.markdown(f"**匹配原因:** {match['match_reason']}")
                             st.markdown(f"**薪资范围:** {match['salary_range']}")
-                            
-                            # 简历修改功能
+
                             with st.expander(f"🔧 修改简历以匹配岗位: {match['job_name']}"):
                                 modify_button_key = f"modify_{job_index}"
-                                
-                                # 检查是否已经生成过优化简历
                                 already_optimized = job_index in st.session_state['optimized_resumes']
-                                
+
                                 if st.button(
                                     "查看优化后的简历" if already_optimized else f"生成针对 {match['job_name']} 的优化简历",
                                     key=modify_button_key
                                 ):
                                     st.session_state['resume_generation_requested'][job_index] = True
-                                
-                                # 处理简历生成请求
+
                                 if st.session_state['resume_generation_requested'].get(job_index):
                                     if not already_optimized:
                                         with st.spinner("正在生成优化后的简历..."):
-                                            final_resume = self.hr.modify_resume_for_job(  # 新引用
+                                            final_resume = self.hr.modify_resume_for_job(
                                                 original_resume=st.session_state['resume_text'],
                                                 job_description=(
                                                     f"{match['job_name']} | {match['company_name']} | "
@@ -458,7 +328,7 @@ class JobUI:
                                                 llm_mode=(
                                                     "local" if st.session_state['llm_mode'] == "本地 Ollama"
                                                     else "openai" if st.session_state['llm_mode'] == "OpenAI 在线模型"
-                                                    else "Deepseek 在线模型"  # 与 llm_hr.py 中保持一致
+                                                    else "Deepseek 在线模型"
                                                 ),
                                                 openai_key=st.session_state.get('openai_key', ""),
                                                 deepseek_key=st.session_state.get('deepseek_key', "")
@@ -467,13 +337,11 @@ class JobUI:
                                                 'resume': final_resume,
                                                 'job_name': match['job_name']
                                             }
-                                    
-                                    # 显示优化后的简历
+
                                     st.write("---")
                                     st.subheader("AI优化后的简历内容:")
                                     st.write(st.session_state['optimized_resumes'][job_index]['resume'])
-                                    
-                                    # 下载按钮
+
                                     dl_data = st.session_state['optimized_resumes'][job_index]['resume'].encode("utf-8")
                                     st.download_button(
                                         label="下载修改后简历 (txt)",
@@ -482,57 +350,197 @@ class JobUI:
                                         mime="text/plain"
                                     )
 
-            # 新增简历打分功能
             if st.button("对简历进行打分"):
-                report = self.hr.score_resume(st.session_state['resume_text'])  # 新引用
+                report = self.hr.score_resume(st.session_state['resume_text'])
                 st.subheader("简历评分报告")
                 st.write(report)
-                
-            # 显示优化后的简历
-            if 'current_optimized_resume' in st.session_state:
-                st.write("---")
-                st.subheader(f"已优化的简历内容 (针对岗位: {st.session_state['current_job_name']})")
-                st.write(st.session_state['current_optimized_resume'])
+
+    # ============ 以下为新增：更多可视化Tab示例，供参考 ============
+
+    def _show_job_distribution_tab(self, tab):
+        with tab:
+            st.subheader("岗位分布可视化")
+            if not self.visualizer:
+                st.warning("请先加载数据")
+                return
+
+            st.plotly_chart(self.visualizer.plot_job_distribution_bar(), use_container_width=True,
+                            key="job_dist_bar")
+            st.plotly_chart(self.visualizer.plot_job_distribution_pie(), use_container_width=True,
+                            key="job_dist_pie")
+            st.plotly_chart(self.visualizer.plot_job_distribution_map(), use_container_width=True,
+                            key="job_dist_map")
+
+    def _show_skill_demand_tab(self, tab):
+        with tab:
+            st.subheader("技能需求可视化")
+
+            if not self.visualizer:
+                st.warning("请先加载数据")
+                return
+
+            # 示例：演示用假数据
+            skill_freq_df = pd.DataFrame({
+                'Python': [10, 12, 5],
+                'Java': [9, 3, 7],
+                'C++': [4, 11, 9]
+            }, index=['岗位A', '岗位B', '岗位C'])
+
+            st.plotly_chart(self.visualizer.plot_skill_heatmap(skill_freq_df), use_container_width=True,
+                            key="skill_heatmap_chart")
+            st.plotly_chart(self.visualizer.plot_skill_bar(), use_container_width=True,
+                            key="skill_bar_chart")
+
+            skill_stats = {"Python": 80, "Java": 70, "SQL": 65, "Linux": 75}
+            st.plotly_chart(self.visualizer.plot_skill_radar(skill_stats), use_container_width=True,
+                            key="skill_radar_chart")
+
+    def _show_promotion_path_tab(self, tab):
+        with tab:
+            st.subheader("晋升路径可视化")
+            if not self.visualizer:
+                st.warning("请先加载数据")
+                return
+
+            promotion_data_tree = pd.DataFrame({
+                'source_position': ['初级', '中级', '高级'],
+                'target_position': ['中级', '高级', '资深'],
+                'value': [1, 1, 1]
+            })
+            st.plotly_chart(self.visualizer.plot_promotion_tree(promotion_data_tree), use_container_width=True,
+                            key="promotion_tree_chart")
+
+            promotion_data_flow = pd.DataFrame({
+                'source': ['初级', '中级', '高级'],
+                'target': ['中级', '高级', '资深'],
+                'value': [5, 3, 2]
+            })
+            st.plotly_chart(self.visualizer.plot_promotion_flow(promotion_data_flow), use_container_width=True,
+                            key="promotion_flow_chart")
+
+            promotion_matrix = pd.DataFrame({
+                '初级': [0, 0.3, 0.6],
+                '中级': [0.2, 0, 0.4],
+                '高级': [0.1, 0.5, 0]
+            }, index=['初级', '中级', '高级'])
+            st.plotly_chart(self.visualizer.plot_promotion_heatmap(promotion_matrix), use_container_width=True,
+                            key="promotion_heatmap_chart")
+
+    def _show_salary_tab(self, tab):
+        with tab:
+            st.subheader("薪资水平可视化")
+            if not self.visualizer:
+                st.warning("请先加载数据")
+                return
+
+            st.plotly_chart(self.visualizer.plot_salary_box(), use_container_width=True, key="salary_box_chart")
+            st.plotly_chart(self.visualizer.plot_salary_bar(), use_container_width=True, key="salary_bar_chart")
+            st.plotly_chart(self.visualizer.plot_salary_heatmap(), use_container_width=True, key="salary_heatmap_chart")
+
+    def _show_satisfaction_tab(self, tab):
+        with tab:
+            st.subheader("员工满意度可视化")
+            if not self.visualizer:
+                st.warning("请先加载数据")
+                return
+
+            st.plotly_chart(self.visualizer.plot_satisfaction_bar(), use_container_width=True,
+                            key="satisfaction_bar_chart")
+
+            satisfaction_example = {"工作环境": 80, "薪资福利": 70, "晋升空间": 60, "管理": 75}
+            st.plotly_chart(self.visualizer.plot_satisfaction_radar(satisfaction_example), use_container_width=True,
+                            key="satisfaction_radar_chart")
+
+            st.plotly_chart(self.visualizer.plot_satisfaction_heatmap(), use_container_width=True,
+                            key="satisfaction_heatmap_chart")
+
+    def _show_work_location_tab(self, tab):
+        with tab:
+            st.subheader("工作地点分布可视化")
+            if not self.visualizer:
+                st.warning("请先加载数据")
+                return
+
+            st.plotly_chart(self.visualizer.plot_location_map(), use_container_width=True, key="location_map_chart")
+            st.plotly_chart(self.visualizer.plot_location_bar(), use_container_width=True, key="location_bar_chart")
+
+    def _show_workload_tab(self, tab):
+        with tab:
+            st.subheader("工作量与效率可视化")
+            if not self.visualizer:
+                st.warning("请先加载数据")
+                return
+
+            st.plotly_chart(self.visualizer.plot_workload_bar(), use_container_width=True, key="workload_bar_chart")
+            st.plotly_chart(self.visualizer.plot_workload_line(), use_container_width=True, key="workload_line_chart")
+            st.plotly_chart(self.visualizer.plot_workload_heatmap(), use_container_width=True,
+                            key="workload_heatmap_chart")
+
+    def _show_summary_tab(self, tab):
+        with tab:
+            st.subheader("总结与建议")
+
+            if not self.visualizer:
+                st.warning("请先加载数据")
+                return
+
+            summary_data = {"技能需求": 80, "岗位分布": 70, "薪资": 90, "满意度": 75}
+            st.plotly_chart(self.visualizer.plot_summary_bar(summary_data), use_container_width=True,
+                            key="summary_bar_chart")
+            st.plotly_chart(self.visualizer.plot_summary_radar(summary_data), use_container_width=True,
+                            key="summary_radar_chart")
+
+            report_text = self.visualizer.generate_comprehensive_report()
+            st.text_area("综合报告", value=report_text, height=200)
 
     def run(self):
-        """
-        Streamlit 应用的主入口函数
-        """
         st.set_page_config(
             page_title="AI岗位分析可视化 & 求职系统",
             layout="wide",
             initial_sidebar_state="expanded"
         )
 
-        # 显示主界面标题
         st.title("AI 岗位分析可视化 & 求职系统")
-        
-        # 第一步：加载数据（如果需要）
+
         load_result = self._load_data()
-        
-        # 只有成功加载数据或 session_state 已指示 data_loaded 才显示后续内容
         if load_result or st.session_state.get('data_loaded', False):
-            # 如果本次 _load_data() 执行后才创建了 data_processor / visualizer，需要再同步到当前实例里
-            # （防止当前 self.data_processor / self.visualizer 还是旧值）
             self.data_processor = st.session_state['data_processor']
             self.visualizer = st.session_state['visualizer']
-            
-            # 第二步：设置 LLM 配置（侧边栏）
+
             self._setup_llm_settings()
-            
-            # 第三步：设置筛选条件（侧边栏）
             filters = self.setup_sidebar()
-            
-            # 应用筛选条件
             if self.data_processor and self.visualizer and filters:
                 filtered_df = self.data_processor.filter_data(filters)
                 self.visualizer.processed_data = filtered_df
-            
-            # 第四步：创建多选项卡
-            tab1, tab2, tab3 = st.tabs(["基础分析", "岗位洞察报表", "求职"])
-            
+
+            # =============== 多选项卡 =============== , tab6, tab7, tab8, tab9, tab10, tab11 
+            tab1, tab2, tab3, tab4, tab5= st.tabs([
+                "基础分析",         # tab1
+                "岗位洞察报表",     # tab2
+                "求职中心",         # tab3
+                "岗位分布",         # tab4
+                "技能需求",         # tab5
+                # "晋升路径",         # tab6
+                # "薪资水平",         # tab7
+                # "员工满意度",       # tab8
+                # "工作地点分布",     # tab9
+                # "工作量与效率",     # tab10
+                # "总结与建议"        # tab11
+            ])
+
             self._show_basic_analysis_tab(tab1)
             self._show_insights_tab(tab2)
             self._show_job_search_tab(tab3)
+
+            # 新增可视化需求
+            self._show_job_distribution_tab(tab4)
+            self._show_skill_demand_tab(tab5)
+            # self._show_promotion_path_tab(tab6)
+            # self._show_salary_tab(tab7)
+            # self._show_satisfaction_tab(tab8)
+            # self._show_work_location_tab(tab9)
+            # self._show_workload_tab(tab10)
+            # self._show_summary_tab(tab11)
+
         else:
             st.info("请先选择并加载数据文件")

@@ -85,18 +85,18 @@ class BossScraper:
         if 'zpData' in data and 'jobList' in data['zpData']:
             for job in data['zpData']['jobList']:
                 job_info = {
-                    '岗位名称': job.get('jobName', ''),
-                    '薪资': job.get('salaryDesc', ''),
-                    '工作经验要求': job.get('jobExperience', ''),
-                    '学历要求': job.get('jobDegree', ''),
-                    '城市': job.get('cityName', ''),
+                    'position_name': job.get('jobName', ''),
+                    'salary': job.get('salaryDesc', ''),
+                    'work_exp': job.get('jobExperience', ''),
+                    'education': job.get('jobDegree', ''),
+                    'work_city': job.get('cityName', ''),
                     '区域': job.get('areaDistrict', ''),
                     '商圈': job.get('businessDistrict', ''),
-                    '公司名称': job.get('brandName', ''),
-                    '公司规模': job.get('brandScaleName', ''),
-                    '行业': job.get('brandIndustry', ''),
-                    '福利待遇': job.get('welfareList', []),
-                    '技能要求': job.get('skills', [])
+                    'company_name': job.get('brandName', ''),
+                    'company_size': job.get('brandScaleName', ''),
+                    'industry': job.get('brandIndustry', ''),
+                    'welfare': job.get('welfareList', []),
+                    'job_summary': job.get('skills', [])
                 }
                 jobs.append(job_info)
         return jobs
@@ -117,7 +117,7 @@ class BossScraper:
                     break
                 for job in page_jobs:
                     # 使用岗位名称和公司名称作为去重键
-                    key = (job.get('岗位名称', ''), job.get('公司名称', ''))
+                    key = (job.get('position_name', ''), job.get('company_name', ''))
                     if key not in self.seen_jobs:
                         self.all_jobs.append(job)
                         self.seen_jobs.add(key)

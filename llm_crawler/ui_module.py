@@ -9,7 +9,7 @@ import streamlit as st
 from data_processor import DataProcessor
 from data_save import JobDatabase
 from visualizer import DataVisualizer
-from llm_hr import LLMHR  # 新增
+from llm_hr import LLMHR  
 
 # ========== 主 UI 类 ==========
 
@@ -214,14 +214,23 @@ class JobUI:
         """
         st.sidebar.header("筛选条件")
         
+            
         if not (self.data_processor and self.visualizer):
             return {}
         
         df = self.visualizer.processed_data
         
-        # 薪资范围
-        min_val = int(df['avg_salary'].min()) if len(df) else 0
-        max_val = int(df['avg_salary'].max()) if len(df) else 50
+        # 修改薪资范围处理逻辑
+        if len(df) > 0:
+            min_val = max(0, int(df['avg_salary'].min()))
+            max_val = max(50, int(df['avg_salary'].max()))
+            # 确保最小值和最大值不相等
+            if min_val == max_val:
+                max_val = min_val + 10  # 如果相等，则最大值加10
+        else:
+            min_val = 0
+            max_val = 50  # 设置默认范围
+        
         salary_range = st.sidebar.slider(
             "薪资范围 (千元)",
             min_value=min_val,

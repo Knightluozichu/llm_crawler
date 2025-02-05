@@ -51,6 +51,13 @@ class DataProcessor:
         """
         df = self.raw_data.copy()
         
+        df ['work_exp'] = df['work_exp'].fillna('经验不限')
+        df['education'] = df['education'].fillna('不限')
+        
+        # 如果没有company_type'列，填充为'未知'
+        if 'company_type' not in df.columns:
+            df['company_type'] = '未知'
+        
         # 处理薪资
         df[['min_salary', 'max_salary']] = df['salary'].apply(
             self._parse_salary
@@ -125,31 +132,60 @@ class DataProcessor:
         
     def _parse_salary(self, salary_str: str) -> List[float]:
         """
-        解析薪资字符串，形如 "1.5万-2万"、"2.2万-4万" 等，统一转换为 [min_k, max_k] (千元)。
-        若无法识别，则返回 [0.0, 0.0]。
-        
-        假设:
-          - "1.5万" => 15 (千)
-          - "2万"   => 20 (千)
+        解析薪资字符串，返回 [min_k, max_k] (千元)
         """
-        # 常见格式： X万-Y万
+        # 检查是否包含薪资次数信息
+        salary_count_pattern = r'(\d+)薪'
+        salary_count_match = re.search(salary_count_pattern, salary_str)
+        if salary_count_match and 'salary_count' not in self.raw_data.columns:
+            self.raw_data['salary_count'] = 12  
+
+        if salary_count_match:
+            salary_count = int(salary_count_match.group(1))
+            current_index = self.raw_data[self.raw_data['salary'] == salary_str].index[-1]
+            self.raw_data.loc[current_index, 'salary_count'] = salary_count
+
+        # 处理面议情况
+        if any(kw in salary_str for kw in ['面议', '面谈', '待定']):
+            return [0.1, 0.1]
+
+        # 处理 K 单位的薪资格式 (支持 15K-25K 和 15-25K)
+        k_pattern = r'(\d+(\.\d+)?)[Kk]?-(\d+(\.\d+)?)[Kk]'
+        k_match = re.search(k_pattern, salary_str)
+        if k_match and ('K' in salary_str.upper() or 'k' in salary_str):
+            min_val = float(k_match.group(1))
+            max_val = float(k_match.group(3))
+            return [min_val, max_val]
+
+        # 处理万为单位的薪资 (X万-Y万)
         pattern = r'(\d+(\.\d+)?)万-(\d+(\.\d+)?)万'
         match = re.search(pattern, salary_str)
         if match:
             min_val = float(match.group(1)) * 10
             max_val = float(match.group(3)) * 10
             return [min_val, max_val]
-        
-        # 若只有第一个数字后带 万，如 "2.2万-4"
+
+        # 处理首个数字带万的情况 (2.2万-4)
         pattern2 = r'(\d+(\.\d+)?)万-(\d+(\.\d+)?)'
         match2 = re.search(pattern2, salary_str)
         if match2:
             min_val = float(match2.group(1)) * 10
-            max_val = float(match2.group(3)) * 10
+            max_val = float(match2.group(3))
             return [min_val, max_val]
-        
-        return [0.0, 0.0]
-        
+
+        # 处理日薪 (150-200元/天)
+        day_pattern = r'(\d+)-(\d+)元/天'
+        day_match = re.search(day_pattern, salary_str)
+        if day_match:
+            min_day = float(day_match.group(1))
+            max_day = float(day_match.group(2))
+            # 假设每月工作22天，转换为月薪(千元)
+            return [min_day * 22 / 1000, max_day * 22 / 1000]
+
+        # 如果无法匹配任何格式，返回默认值
+        return [0.1, 0.1]
+    
+    
     def _parse_experience(self, exp_str: str) -> float:
         """
         解析工作经验字符串：
@@ -160,6 +196,9 @@ class DataProcessor:
         :param exp_str: 如 "3年", "经验不限", "无经验", ...
         :return: 工作年限的数值
         """
+        # if pd.isna(exp_str):
+        #     return 0.0
+        # exp_str = str(exp_str)
         if any(kw in exp_str for kw in ['不限', '无经验']):
             return 0.0
         pattern = r'(\d+(\.\d+)?)'
@@ -181,6 +220,9 @@ class DataProcessor:
         :param edu_str: 学历描述字符串
         :return: 对应的数值编码
         """
+        # if pd.isna(edu_str):
+        #     return 0
+        # edu_str = str(edu_str)
         edu_map = {
             '不限': 0,
             '大专': 1,

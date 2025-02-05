@@ -222,7 +222,7 @@ class BossZPCrawler:
             print(f"第 {current_page} 页获取到 {len(processed)} 条有效数据")
             
             current_page += 1
-            time.sleep(random.randint(4, 8))  # 模拟人工翻页间隔
+            time.sleep(random.uniform(0.01, 0.5))  # 模拟人工翻页间隔
 
 
         self._save_to_csv(all_jobs)

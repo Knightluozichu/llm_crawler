@@ -1,3 +1,4 @@
+from math import e
 import pathlib
 import time
 import pandas as pd
@@ -144,25 +145,29 @@ class BossScraper:
         退出浏览器并清理资源。
         """
         self.page.quit()
+        
+    # 在代码中添加如下测试代码
+    def test_proxy(self):
+        self.page.get('https://httpbin.org/ip')
+        return self.page.html  # 查看返回的IP是否是代理IP
 
 
 if __name__ == "__main__":
     job_kw = "unity"
     job_city = "101020100"  # 上海的城市编号
-    # 提供代理 ip 及端口，例如 "115.207.122.156:20175"
-    # 传入代理时支持字符串形式，也可传入代理字典形式：
-    # proxy = {
-    #     'http': 'http://115.207.122.156:20175',
-    #     'https': 'http://115.207.122.156:20175'
-    # }
-    proxy = "113.121.188.69:11169"
+    
+    proxy = "183.7.120.127:20831"
     scraper = BossScraper(job_kw, job_city, proxy=proxy)
 
-    # 如需在运行过程中动态修改代理，可调用如下代码：
-    # new_proxy = "192.168.1.100:3128"
-    # scraper.set_proxy(new_proxy)
-
     try:
+        print("测试代理连接...")
+        IP = scraper.test_proxy()  # 验证代理是否工作
+        print(f"检查代理IP: {IP}")
+        if IP['origin'] == proxy.split(':')[0]:
+            print("代理测试通过")
+        else:
+            print("代理测试失败")
+            raise ConnectionError("代理测试失败")
         scraper.run()
     finally:
         scraper.save_data()

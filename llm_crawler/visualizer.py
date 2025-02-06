@@ -8,6 +8,8 @@ import base64
 from typing import Dict, List, Any
 from collections import Counter
 from pathlib import Path
+from rapidfuzz import process, fuzz
+import re
 
 from data_processor import DataProcessor
 
@@ -259,26 +261,68 @@ class DataVisualizer:
         )
         return fig
 
-    def plot_skill_bar(self, skill_col='skill_name', count_col='skill_count') -> go.Figure:
-        if skill_col not in self.processed_data.columns or count_col not in self.processed_data.columns:
+    def plot_skill_bar(self) -> go.Figure:
+        """
+        1. 将 job_summary 中所有词汇分割后统计；
+        2. 使用模糊匹配统一相似度高的关键词，视为同一技能；
+        3. 最终只画前5个最常见的“技能”。
+        4. 去除 [ 和 ' 等多余字符。
+        """
+        if 'job_summary' not in self.processed_data.columns:
             return go.Figure()
 
-        df_skill = (
-            self.processed_data
-            .groupby(skill_col)[count_col]
-            .sum()
-            .reset_index()
-            .sort_values(count_col, ascending=False)
-        )
+        # 合并所有 summary 文本并简易分词
+        all_text = " ".join(self.processed_data['job_summary'].fillna("").astype(str)).lower()
+        tokens_raw = all_text.split()
+
+        if not tokens_raw:
+            return go.Figure()
+
+        # 使用正则去除 '[' , ']' , "'" 等字符
+        # 仅保留 token 不为空
+        tokens = []
+        for t in tokens_raw:
+            cleaned = re.sub(r"[\[\]']", "", t).strip()  # 去掉方括号和单引号, 再 strip()
+            if cleaned:
+                tokens.append(cleaned)
+
+        if not tokens:
+            return go.Figure()
+
+        # 先统计出现次数
+        raw_counter = Counter(tokens)
+        skill_map = {}
+        THRESHOLD = 80
+
+        for token, freq in raw_counter.items():
+            if not skill_map:
+                # skill_map还没任何技能, 直接加
+                skill_map[token] = freq
+            else:
+                # 模糊匹配来合并相似技能
+                res = process.extractOne(token, skill_map.keys(), scorer=fuzz.partial_ratio)
+                if res:
+                    best_match, best_score, _ = res
+                    if best_score >= THRESHOLD:
+                        skill_map[best_match] += freq
+                    else:
+                        skill_map[token] = freq
+                else:
+                    skill_map[token] = freq
+
+        # 构造成 DataFrame, 取前5
+        df_skill = pd.DataFrame(list(skill_map.items()), columns=['skill_name', 'skill_count'])
+        df_skill = df_skill.sort_values('skill_count', ascending=False).head(5)
+
         fig = px.bar(
             df_skill,
-            x=skill_col,
-            y=count_col,
-            title='技能需求量对比',
-            labels={skill_col: '技能名称', count_col: '需求量'}
+            x='skill_name',
+            y='skill_count',
+            title='技能需求量 Top 5 (相似技能已合并)',
+            labels={'skill_name': '技能名称', 'skill_count': '出现次数'}
         )
         return fig
-
+        
     def plot_skill_radar(self, skill_stats: Dict[str, float] = None) -> go.Figure:
         if not skill_stats:
             return go.Figure()

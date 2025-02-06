@@ -22,11 +22,13 @@ class JobUI:
         self.data_dir = data_root / 'data'
         self._init_session_state()
 
+        # 从会话状态获取或初始化
         self.data_processor = st.session_state['data_processor']
         self.visualizer = st.session_state['visualizer']
         self.hr = LLMHR()
 
     def _init_session_state(self):
+        """统一初始化会话状态。"""
         default_states = {
             'resume_text': "",
             'llm_mode': "本地 Ollama",
@@ -48,6 +50,7 @@ class JobUI:
                 st.session_state[k] = v
 
     def _load_data(self):
+        """用户在侧边栏或页面上选择 CSV 或数据库，并加载数据。"""
         if st.session_state['data_loaded']:
             st.info("数据已加载。若需重新加载，请重新选择并点击按钮。")
 
@@ -66,6 +69,7 @@ class JobUI:
                         st.error(f"数据文件不存在: {data_file}")
                         return None
 
+                    # 初始化数据处理与可视化
                     self.data_processor = DataProcessor(data_file)
                     self.visualizer = DataVisualizer(self.data_processor)
                     st.session_state['data_processor'] = self.data_processor
@@ -79,6 +83,7 @@ class JobUI:
                     st.error(f"加载数据失败: {str(e)}")
                     return None
         else:
+            # 数据库表加载
             try:
                 db = JobDatabase()
                 table_names = db.get_table_names()
@@ -121,6 +126,7 @@ class JobUI:
         return None
 
     def _setup_llm_settings(self):
+        """设置 LLM 模式（本地/Ollama、OpenAI、Deepseek）。"""
         st.sidebar.header("AI 设置")
         mode_options = ["本地 Ollama", "OpenAI 在线模型", "Deepseek 在线模型"]
         llm_mode = st.sidebar.radio("选择 LLM 模式", options=mode_options, key="llm_mode")
@@ -145,6 +151,7 @@ class JobUI:
             st.session_state['deepseek_key'] = deepseek_key
 
     def setup_sidebar(self) -> Dict:
+        """侧边栏筛选条件：薪资范围、工作经验、学历、公司类型、福利标签"""
         st.sidebar.header("筛选条件")
 
         if not (self.data_processor and self.visualizer):
@@ -181,6 +188,7 @@ class JobUI:
             default=company_types
         )
 
+        # 收集 welfare_tags
         all_welfare_tags = []
         for tags in df.get('welfare_tags', []):
             if isinstance(tags, list):
@@ -201,6 +209,7 @@ class JobUI:
         }
 
     def _handle_resume_upload(self):
+        """上传并解析简历文件（PDF、Word）。"""
         uploaded_file = st.file_uploader("上传简历（PDF或Word）", type=["pdf", "doc", "docx"])
         if uploaded_file is not None:
             file_type = uploaded_file.name.split('.')[-1].lower()
@@ -212,37 +221,56 @@ class JobUI:
                 st.success("简历上传并解析成功！")
 
     def _show_basic_analysis_tab(self, tab):
+        """
+        1. 基础分析：
+           - 薪资分布、学历、经验、公司类型
+           - 词云
+           - 岗位分布（原先在 _show_job_distribution_tab 的内容）
+           - 技能需求（原先在 _show_skill_demand_tab 的内容）
+        """
         with tab:
             st.subheader("基础分析")
             if not self.visualizer:
                 st.warning("请先加载数据")
                 return
 
-            st.plotly_chart(self.visualizer.plot_salary_distribution(), use_container_width=True,
+            # 原始基础分析
+            st.plotly_chart(self.visualizer.plot_salary_distribution(), use_container_width=True, 
                             key="basic_salary_dist")
 
             col1, col2 = st.columns(2)
             with col1:
-                st.plotly_chart(self.visualizer.plot_education_pie(), use_container_width=True,
+                st.plotly_chart(self.visualizer.plot_education_pie(), use_container_width=True, 
                                 key="basic_education_pie")
             with col2:
-                st.plotly_chart(self.visualizer.plot_experience_bar(), use_container_width=True,
+                st.plotly_chart(self.visualizer.plot_experience_bar(), use_container_width=True, 
                                 key="basic_experience_bar")
 
             col3, col4 = st.columns(2)
             with col3:
-                st.plotly_chart(self.visualizer.plot_company_type_pie(), use_container_width=True,
+                st.plotly_chart(self.visualizer.plot_company_type_pie(), use_container_width=True, 
                                 key="basic_company_type_pie")
             with col4:
-                st.info("更多图表可在此扩展...")
-
+                st.plotly_chart(self.visualizer.plot_job_distribution_bar(), use_container_width=True, 
+                            key="job_dist_bar")
+                
+            col5, col6 = st.columns(2)
+            with col5:
+                st.plotly_chart(self.visualizer.plot_job_distribution_pie(), use_container_width=True, 
+                            key="job_dist_pie")
+            with col6:
+                st.plotly_chart(self.visualizer.plot_skill_bar(), use_container_width=True,
+                            key="skill_bar_chart")
+                
             wordcloud_data = self.visualizer.plot_wordcloud()
             if wordcloud_data:
                 st.image(BytesIO(base64.b64decode(wordcloud_data)), caption='职位描述关键词云图')
             else:
                 st.warning("无法生成词云，可能无有效职位描述数据")
 
+
     def _show_insights_tab(self, tab):
+        """2. 岗位洞察报表"""
         with tab:
             st.subheader("岗位洞察报表")
             if not self.visualizer:
@@ -272,6 +300,7 @@ class JobUI:
                 )
 
     def _show_job_search_tab(self, tab):
+        """3. 求职中心：简历匹配、定制化修改、打分。"""
         with tab:
             st.subheader("求职中心：简历匹配与定制化修改")
             self._handle_resume_upload()
@@ -355,145 +384,8 @@ class JobUI:
                 st.subheader("简历评分报告")
                 st.write(report)
 
-    # ============ 以下为新增：更多可视化Tab示例，供参考 ============
-
-    def _show_job_distribution_tab(self, tab):
-        with tab:
-            st.subheader("岗位分布可视化")
-            if not self.visualizer:
-                st.warning("请先加载数据")
-                return
-
-            st.plotly_chart(self.visualizer.plot_job_distribution_bar(), use_container_width=True,
-                            key="job_dist_bar")
-            st.plotly_chart(self.visualizer.plot_job_distribution_pie(), use_container_width=True,
-                            key="job_dist_pie")
-            st.plotly_chart(self.visualizer.plot_job_distribution_map(), use_container_width=True,
-                            key="job_dist_map")
-
-    def _show_skill_demand_tab(self, tab):
-        with tab:
-            st.subheader("技能需求可视化")
-
-            if not self.visualizer:
-                st.warning("请先加载数据")
-                return
-
-            # 示例：演示用假数据
-            skill_freq_df = pd.DataFrame({
-                'Python': [10, 12, 5],
-                'Java': [9, 3, 7],
-                'C++': [4, 11, 9]
-            }, index=['岗位A', '岗位B', '岗位C'])
-
-            st.plotly_chart(self.visualizer.plot_skill_heatmap(skill_freq_df), use_container_width=True,
-                            key="skill_heatmap_chart")
-            st.plotly_chart(self.visualizer.plot_skill_bar(), use_container_width=True,
-                            key="skill_bar_chart")
-
-            skill_stats = {"Python": 80, "Java": 70, "SQL": 65, "Linux": 75}
-            st.plotly_chart(self.visualizer.plot_skill_radar(skill_stats), use_container_width=True,
-                            key="skill_radar_chart")
-
-    def _show_promotion_path_tab(self, tab):
-        with tab:
-            st.subheader("晋升路径可视化")
-            if not self.visualizer:
-                st.warning("请先加载数据")
-                return
-
-            promotion_data_tree = pd.DataFrame({
-                'source_position': ['初级', '中级', '高级'],
-                'target_position': ['中级', '高级', '资深'],
-                'value': [1, 1, 1]
-            })
-            st.plotly_chart(self.visualizer.plot_promotion_tree(promotion_data_tree), use_container_width=True,
-                            key="promotion_tree_chart")
-
-            promotion_data_flow = pd.DataFrame({
-                'source': ['初级', '中级', '高级'],
-                'target': ['中级', '高级', '资深'],
-                'value': [5, 3, 2]
-            })
-            st.plotly_chart(self.visualizer.plot_promotion_flow(promotion_data_flow), use_container_width=True,
-                            key="promotion_flow_chart")
-
-            promotion_matrix = pd.DataFrame({
-                '初级': [0, 0.3, 0.6],
-                '中级': [0.2, 0, 0.4],
-                '高级': [0.1, 0.5, 0]
-            }, index=['初级', '中级', '高级'])
-            st.plotly_chart(self.visualizer.plot_promotion_heatmap(promotion_matrix), use_container_width=True,
-                            key="promotion_heatmap_chart")
-
-    def _show_salary_tab(self, tab):
-        with tab:
-            st.subheader("薪资水平可视化")
-            if not self.visualizer:
-                st.warning("请先加载数据")
-                return
-
-            st.plotly_chart(self.visualizer.plot_salary_box(), use_container_width=True, key="salary_box_chart")
-            st.plotly_chart(self.visualizer.plot_salary_bar(), use_container_width=True, key="salary_bar_chart")
-            st.plotly_chart(self.visualizer.plot_salary_heatmap(), use_container_width=True, key="salary_heatmap_chart")
-
-    def _show_satisfaction_tab(self, tab):
-        with tab:
-            st.subheader("员工满意度可视化")
-            if not self.visualizer:
-                st.warning("请先加载数据")
-                return
-
-            st.plotly_chart(self.visualizer.plot_satisfaction_bar(), use_container_width=True,
-                            key="satisfaction_bar_chart")
-
-            satisfaction_example = {"工作环境": 80, "薪资福利": 70, "晋升空间": 60, "管理": 75}
-            st.plotly_chart(self.visualizer.plot_satisfaction_radar(satisfaction_example), use_container_width=True,
-                            key="satisfaction_radar_chart")
-
-            st.plotly_chart(self.visualizer.plot_satisfaction_heatmap(), use_container_width=True,
-                            key="satisfaction_heatmap_chart")
-
-    def _show_work_location_tab(self, tab):
-        with tab:
-            st.subheader("工作地点分布可视化")
-            if not self.visualizer:
-                st.warning("请先加载数据")
-                return
-
-            st.plotly_chart(self.visualizer.plot_location_map(), use_container_width=True, key="location_map_chart")
-            st.plotly_chart(self.visualizer.plot_location_bar(), use_container_width=True, key="location_bar_chart")
-
-    def _show_workload_tab(self, tab):
-        with tab:
-            st.subheader("工作量与效率可视化")
-            if not self.visualizer:
-                st.warning("请先加载数据")
-                return
-
-            st.plotly_chart(self.visualizer.plot_workload_bar(), use_container_width=True, key="workload_bar_chart")
-            st.plotly_chart(self.visualizer.plot_workload_line(), use_container_width=True, key="workload_line_chart")
-            st.plotly_chart(self.visualizer.plot_workload_heatmap(), use_container_width=True,
-                            key="workload_heatmap_chart")
-
-    def _show_summary_tab(self, tab):
-        with tab:
-            st.subheader("总结与建议")
-
-            if not self.visualizer:
-                st.warning("请先加载数据")
-                return
-
-            summary_data = {"技能需求": 80, "岗位分布": 70, "薪资": 90, "满意度": 75}
-            st.plotly_chart(self.visualizer.plot_summary_bar(summary_data), use_container_width=True,
-                            key="summary_bar_chart")
-            st.plotly_chart(self.visualizer.plot_summary_radar(summary_data), use_container_width=True,
-                            key="summary_radar_chart")
-
-            report_text = self.visualizer.generate_comprehensive_report()
-            st.text_area("综合报告", value=report_text, height=200)
-
     def run(self):
+        """Streamlit 应用主入口。"""
         st.set_page_config(
             page_title="AI岗位分析可视化 & 求职系统",
             layout="wide",
@@ -513,34 +405,17 @@ class JobUI:
                 filtered_df = self.data_processor.filter_data(filters)
                 self.visualizer.processed_data = filtered_df
 
-            # =============== 多选项卡 =============== , tab6, tab7, tab8, tab9, tab10, tab11 
-            tab1, tab2, tab3, tab4, tab5= st.tabs([
-                "基础分析",         # tab1
-                "岗位洞察报表",     # tab2
-                "求职中心",         # tab3
-                "岗位分布",         # tab4
-                "技能需求",         # tab5
-                # "晋升路径",         # tab6
-                # "薪资水平",         # tab7
-                # "员工满意度",       # tab8
-                # "工作地点分布",     # tab9
-                # "工作量与效率",     # tab10
-                # "总结与建议"        # tab11
+            # 只保留三个主要选项卡
+            tab_basic, tab_insights, tab_jobsearch = st.tabs([
+                "基础分析",      # tab_basic
+                "岗位洞察报表",  # tab_insights
+                "求职中心"       # tab_jobsearch
             ])
 
-            self._show_basic_analysis_tab(tab1)
-            self._show_insights_tab(tab2)
-            self._show_job_search_tab(tab3)
-
-            # 新增可视化需求
-            self._show_job_distribution_tab(tab4)
-            self._show_skill_demand_tab(tab5)
-            # self._show_promotion_path_tab(tab6)
-            # self._show_salary_tab(tab7)
-            # self._show_satisfaction_tab(tab8)
-            # self._show_work_location_tab(tab9)
-            # self._show_workload_tab(tab10)
-            # self._show_summary_tab(tab11)
+            # 调用各自的显示方法
+            self._show_basic_analysis_tab(tab_basic)
+            self._show_insights_tab(tab_insights)
+            self._show_job_search_tab(tab_jobsearch)
 
         else:
             st.info("请先选择并加载数据文件")

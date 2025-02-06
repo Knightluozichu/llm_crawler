@@ -79,6 +79,7 @@ class DataProcessor:
         # 处理福利 (welfare -> welfare_tags)
         df['welfare_tags'] = df['welfare'].apply(self._parse_welfare_tags)
         
+    
         return df
         
     def get_processed_data(self) -> pd.DataFrame:

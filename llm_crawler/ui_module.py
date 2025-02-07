@@ -43,7 +43,8 @@ class JobUI:
             'resume_generation_requested': {},
             'deepseek_key': "",
             'data_processor': None,
-            'visualizer': None
+            'visualizer': None,
+            'global_storage_type': '数据库'
         }
         for k, v in default_states.items():
             if k not in st.session_state:
@@ -386,14 +387,8 @@ class JobUI:
 
     def run(self):
         """Streamlit 应用主入口。"""
-        st.set_page_config(
-            page_title="AI岗位分析可视化 & 求职系统",
-            layout="wide",
-            initial_sidebar_state="expanded"
-        )
-
-        st.title("AI 岗位分析可视化 & 求职系统")
-
+        # Removed set_page_config as it's now in visual_data.py
+        
         load_result = self._load_data()
         if load_result or st.session_state.get('data_loaded', False):
             self.data_processor = st.session_state['data_processor']

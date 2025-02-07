@@ -5,7 +5,6 @@ import os
 import json
 import time
 import logging
-from pathlib import Path
 from typing import Optional, Dict, List
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -18,8 +17,8 @@ from selenium.common.exceptions import TimeoutException, WebDriverException
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-class ZhilianLogin:
-    """智联招聘登录管理类"""
+class BossLogin:
+    """BOSS直聘登录管理类"""
     
     def __init__(self, cookie_path: str):
         """
@@ -28,10 +27,9 @@ class ZhilianLogin:
         Args:
             cookie_path: cookie文件保存路径
         """
-        self.cookie_path = str(Path(cookie_path).resolve())  # 确保是绝对路径字符串
-        logger.info(f"Cookie 文件路径: {self.cookie_path}")
-        self.base_url = "https://www.zhaopin.com"
-        self.login_url = "https://passport.zhaopin.com/login"
+        self.cookie_path = str(cookie_path)  # 确保是字符串类型
+        self.base_url = "https://www.zhipin.com"
+        self.login_url = "https://www.zhipin.com/web/user/?ka=header-login"
         
     def init_driver(self) -> Optional[webdriver.Chrome]:
         """
@@ -136,9 +134,9 @@ class ZhilianLogin:
             
             # 检查登录状态的多个可能元素
             login_indicators = [
-                "//span[contains(@class, 'c-login__top__name')]",  # 用户名显示
-                "//div[contains(@class, 'zp-userinfo')]",          # 用户信息区域
-                "//a[contains(@href, '/personal/')]"               # 个人中心链接
+                "//div[contains(@class, 'user-nav')]",     # 用户导航区域
+                "//a[contains(@href, '/web/geek/')]",      # 个人主页链接
+                "//div[contains(@class, 'avatar')]"        # 头像区域
             ]
             
             for indicator in login_indicators:
@@ -213,5 +211,5 @@ def get_logged_in_driver(cookie_path: str) -> Optional[webdriver.Chrome]:
     Returns:
         Optional[webdriver.Chrome]: 登录成功返回driver实例，失败返回None
     """
-    login_manager = ZhilianLogin(cookie_path)
+    login_manager = BossLogin(cookie_path)
     return login_manager.login()

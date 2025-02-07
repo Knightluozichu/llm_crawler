@@ -61,6 +61,8 @@ def cache_all_page(url: str, max_pages: int = 1, existing_driver=None, city=None
             driver.get(page_url)
             time.sleep(2)  # 等待页面加载
             
+            if st:
+                st.write(f"抓取链接: {page_url}")
             page_source = driver.page_source
             df = extract_data(page_source)
             
@@ -188,15 +190,21 @@ def save_to_database(df, table_name='jobs'):
         table_name: Name of the table to save data to (default: 'jobs')
     """
     
+    # 从全局session_state获取存储类型
+    storage_type = st.session_state.get('global_storage_type', '数据库')
+    
     # Initialize database
     db = JobDatabase()
-    db.create_table(table_name)
+    
+    # 检查表是否存在，如果不存在则创建
+    if table_name not in db.get_table_names():
+        db.create_table(table_name)
     
     # Insert each row into database
     for _, row in df.iterrows():
         try:
             db.insert_job(
-                table_name=table_name,  # 添加 table_name 参数
+                table_name=table_name,
                 position_name=row['position_name'],
                 company_name=row['company_name'], 
                 salary=row['salary'],
@@ -216,17 +224,10 @@ def save_to_database(df, table_name='jobs'):
                 st.write(f"Added job: {row['position_name']} at {row['company_name']}")
                 
         except Exception as e:
-            print(f"Error saving job to database: {e}")
+            print(f"插入数据失败: {e}")
             if st:
-                st.error(f"Error saving job to database: {e}")
+                st.error(f"插入数据失败: {e}")
 
-
-# 添加命令行入口
-if __name__ == '__main__':
-    # 设置日志级别
-    logging.basicConfig(level=logging.INFO)
-    
-    # 测试数据提取
 # 添加命令行入口
 if __name__ == '__main__':
     # 设置日志级别

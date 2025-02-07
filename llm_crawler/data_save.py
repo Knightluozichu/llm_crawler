@@ -4,6 +4,7 @@ class JobDatabase:
     def __init__(self, db_name='job_database.db'):
         self.db_name = db_name
         # self.table_name = table_name
+        # self.conn = sqlite3.connect('jobs.db')
         
     def connect(self):
         self.conn = sqlite3.connect(self.db_name)

@@ -5,9 +5,49 @@ import pandas as pd
 from DrissionPage import ChromiumPage
 from DrissionPage.errors import ElementNotFoundError
 from DrissionPage import  Chromium, ChromiumOptions
+from data_save import JobDatabase
 
-
-
+def save_to_database(df, table_name='jobs'):
+    """
+    Save job data to SQLite database
+    Args:
+        df: DataFrame containing job information
+        table_name: Name of the table to save data to (default: 'jobs')
+    """
+    # Initialize database
+    db = JobDatabase()
+    
+    # 检查表是否存在，如果不存在则创建
+    if table_name not in db.get_table_names():
+        db.create_table(table_name)
+    
+    # Insert each row into database
+    for _, row in df.iterrows():
+        try:
+            db.insert_job(
+                table_name=table_name,
+                position_name=row['position_name'],
+                company_name=row['company_name'], 
+                salary=row['salary'],
+                work_city=row['work_city'],
+                work_exp=row['work_exp'],
+                education=row['education'],
+                company_size=row['company_size'],
+                company_type=row['company_type'],
+                industry=row['industry'],
+                position_url=row['position_url'],
+                job_summary=row['job_summary'],
+                welfare=row['welfare'],
+                salary_count=row['salary_count']
+            )
+            print(f"Added job: {row['position_name']} at {row['company_name']}")
+            # if st:
+            #     st.write(f"Added job: {row['position_name']} at {row['company_name']}")
+                
+        except Exception as e:
+            print(f"插入数据失败: {e}")
+            # if st:
+            #     st.error(f"插入数据失败: {e}")
 class BossScraper:
     def __init__(self, job_kw, job_city, proxy=None, data_dir='data'):
         """
@@ -90,8 +130,8 @@ class BossScraper:
                     'work_exp': job.get('jobExperience', ''),
                     'education': job.get('jobDegree', ''),
                     'work_city': job.get('cityName', ''),
-                    '区域': job.get('areaDistrict', ''),
-                    '商圈': job.get('businessDistrict', ''),
+                    # '区域': job.get('areaDistrict', ''),
+                    # '商圈': job.get('businessDistrict', ''),
                     'company_name': job.get('brandName', ''),
                     'company_size': job.get('brandScaleName', ''),
                     'industry': job.get('brandIndustry', ''),
@@ -103,10 +143,11 @@ class BossScraper:
 
     def run(self):
         """
-        主运行函数：循环抓取每一页数据，直到遇到空数据或异常。
+        主运行函数：循环抓取每一页数据，直到遇到空数据、异常或数据不再增加。
         在抓取过程中，对职位进行去重（以岗位名称和公司名称为唯一标识）。
         """
         page_number = 1
+        previous_job_count = 0
         while True:
             try:
                 print(f"正在获取第 {page_number} 页数据")
@@ -114,29 +155,42 @@ class BossScraper:
                 page_jobs = self.parse_jobs(data)
                 if not page_jobs:
                     print(f"第 {page_number} 页数据为空或数据结构异常，停止翻页")
+                    print(f"异常数据:{data}")
                     break
                 for job in page_jobs:
-                    # 使用岗位名称和公司名称作为去重键
                     key = (job.get('position_name', ''), job.get('company_name', ''))
                     if key not in self.seen_jobs:
                         self.all_jobs.append(job)
                         self.seen_jobs.add(key)
-                print(f"成功获取第 {page_number} 页数据，累计 {len(self.all_jobs)} 条去重后的职位")
+                current_job_count = len(self.all_jobs)
+                print(f"成功获取第 {page_number} 页数据，累计 {current_job_count} 条去重后的职位")
+                if current_job_count == previous_job_count:
+                    print("数据不再增加，停止抓取")
+                    break
+                previous_job_count = current_job_count
                 page_number += 1
             except Exception as e:
                 print(f"获取第 {page_number} 页数据时发生异常: {repr(e)}")
                 break
 
-    def save_data(self):
+    def save_data(self, table_name):
+        # """
+        # 保存爬取的职位数据到 CSV 文件。
+        # """
+        # if self.all_jobs:
+        #     df = pd.DataFrame(self.all_jobs)
+        #     filename = f"boss_{self.job_kw}_{self.job_city}.csv"
+        #     file_path = self.data_dir / filename
+        #     df.to_csv(file_path, index=False, encoding='utf-8-sig')
+        #     print(f"成功保存 {len(self.all_jobs)} 条数据到 {file_path}")
+        # else:
+        #     print("未获取到有效数据，数据保存被跳过")
         """
-        保存爬取的职位数据到 CSV 文件。
+        保存爬取的职位数据到数据库。
         """
         if self.all_jobs:
             df = pd.DataFrame(self.all_jobs)
-            filename = f"boss_{self.job_kw}_{self.job_city}.csv"
-            file_path = self.data_dir / filename
-            df.to_csv(file_path, index=False, encoding='utf-8-sig')
-            print(f"成功保存 {len(self.all_jobs)} 条数据到 {file_path}")
+            save_to_database(df, table_name)
         else:
             print("未获取到有效数据，数据保存被跳过")
 
@@ -153,22 +207,24 @@ class BossScraper:
 
 
 if __name__ == "__main__":
-    job_kw = "unity"
-    job_city = "101020100"  # 上海的城市编号
+    import sqlite3
+    print(sqlite3.sqlite_version)
+    # job_kw = "unity"
+    # job_city = "101020100"  # 上海的城市编号
     
-    proxy = "183.7.120.127:20831"
-    scraper = BossScraper(job_kw, job_city, proxy=proxy)
+    # proxy = "183.7.120.127:20831"
+    # scraper = BossScraper(job_kw, job_city, proxy=proxy)
 
-    try:
-        print("测试代理连接...")
-        IP = scraper.test_proxy()  # 验证代理是否工作
-        print(f"检查代理IP: {IP}")
-        if IP['origin'] == proxy.split(':')[0]:
-            print("代理测试通过")
-        else:
-            print("代理测试失败")
-            raise ConnectionError("代理测试失败")
-        scraper.run()
-    finally:
-        scraper.save_data()
-        scraper.quit()
+    # try:
+    #     print("测试代理连接...")
+    #     IP = scraper.test_proxy()  # 验证代理是否工作
+    #     print(f"检查代理IP: {IP}")
+    #     if IP['origin'] == proxy.split(':')[0]:
+    #         print("代理测试通过")
+    #     else:
+    #         print("代理测试失败")
+    #         raise ConnectionError("代理测试失败")
+    #     scraper.run()
+    # finally:
+    #     scraper.save_data()
+    #     scraper.quit()

@@ -463,6 +463,19 @@ class UIComponents:
         st.title("BOSS直聘数据爬取")
         st.info("BOSS直聘无需登录，可直接开始爬取")
 
+        # 将代理控件移出表单，确保交互时能即时显示
+        use_proxy = st.checkbox("使用代理", value=False, key="boss_use_proxy")
+        proxy = None
+        if use_proxy:
+            col_proxy1, col_proxy2 = st.columns(2)
+            with col_proxy1:
+                proxy_ip = st.text_input("代理IP", help="请输入代理服务器的IP地址", key="boss_proxy_ip")
+            with col_proxy2:
+                proxy_port = st.text_input("代理端口", help="请输入代理服务器的端口号", key="boss_proxy_port")
+            if proxy_ip and proxy_port:
+                proxy = f"{proxy_ip}:{proxy_port}"
+
+        # 搜索配置和保存配置放在表单中
         with st.form("boss_crawler_form"):
             st.subheader("搜索配置")
 
@@ -478,22 +491,14 @@ class UIComponents:
                     "成都": "101270100"
                 }
                 selected_city = st.selectbox("选择城市", options=list(city_mapping.keys()))
-
             with col2:
-                use_proxy = st.checkbox("使用代理", value=False)
-                proxy = None
-                if use_proxy:
-                    proxy_ip = st.text_input("代理IP", help="请输入代理服务器的IP地址")
-                    proxy_port = st.text_input("代理端口", help="请输入代理服务器的端口号")
-                    if proxy_ip and proxy_port:
-                        proxy = f"{proxy_ip}:{proxy_port}"
+                # 此处可以放其他控件，或空着也可以
+                st.write("")
 
             st.markdown("---")
             st.subheader("保存配置")
-            
-            # 添加保存方式选择控件：追加到总表 或 新建单独的表
-            # save_mode = st.radio("请选择保存方式", ("追加到总表", "新建单独的表"), key="boss_save_mode")
-            
+            # 这里可以添加其他保存配置控件
+
             submitted = st.form_submit_button("开始爬取")
 
             if submitted:
@@ -509,7 +514,7 @@ class UIComponents:
                 scraper = BossScraper(
                     job_kw=job_keyword,
                     job_city=city_code,
-                    proxy=proxy,
+                    proxy=proxy,  # 使用在表单外获得的代理信息
                     data_dir=str(data_dir)
                 )
 
@@ -529,13 +534,7 @@ class UIComponents:
                     progress_bar.progress(50)
 
                     status_text.text("正在保存数据...")
-                    # # 根据保存方式确定 table_name
-                    # if save_mode == "追加到总表":
                     table_name = "jobs"
-                    # else:
-                    #     # 新建单独的表，表名规则：城市名 + 职位关键词
-                    #     table_name = f"{selected_city}_{job_keyword}".replace(" ", "_")
-                    
                     scraper.save_data(table_name)
                     progress_bar.progress(100)
 

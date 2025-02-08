@@ -133,10 +133,13 @@ class JobUI:
         llm_mode = st.sidebar.radio("选择 LLM 模式", options=mode_options, key="llm_mode")
 
         if llm_mode == "本地 Ollama":
+            self.hr.change_llm_mode("local")
             local_models = self.hr.get_local_models()
             selected_model = st.sidebar.selectbox("选择本地模型", local_models, key="local_model_select")
             st.session_state['local_model'] = selected_model
+            self.hr.set_local_model(selected_model)
         elif llm_mode == "OpenAI 在线模型":
+            self.hr.change_llm_mode("openai")
             openai_key = st.sidebar.text_input(
                 "输入 OpenAI API Key (必填)",
                 value=st.session_state.get('openai_key', ""),
@@ -144,6 +147,7 @@ class JobUI:
             )
             st.session_state['openai_key'] = openai_key
         else:
+            self.hr.change_llm_mode("deepseek")
             deepseek_key = st.sidebar.text_input(
                 "输入 Deepseek API Key (必填)",
                 value=st.session_state.get('deepseek_key', ""),
@@ -319,7 +323,8 @@ class JobUI:
                 else:
                     if not st.session_state['matched_jobs_displayed']:
                         df = self.visualizer.processed_data
-                        job_matches = self.hr.match_jobs_with_resume(
+                        # job_matches = self.hr.match_jobs_with_resume(
+                        job_matches = self.hr.match_jobs_with_resume_llm(
                             resume_text=st.session_state['resume_text'],
                             job_df=df
                         )
@@ -355,13 +360,13 @@ class JobUI:
                                                     f"{match['job_name']} | {match['company_name']} | "
                                                     f"薪资: {match['salary_range']}"
                                                 ),
-                                                llm_mode=(
-                                                    "local" if st.session_state['llm_mode'] == "本地 Ollama"
-                                                    else "openai" if st.session_state['llm_mode'] == "OpenAI 在线模型"
-                                                    else "Deepseek 在线模型"
-                                                ),
-                                                openai_key=st.session_state.get('openai_key', ""),
-                                                deepseek_key=st.session_state.get('deepseek_key', "")
+                                                # llm_mode=(
+                                                #     "local" if st.session_state['llm_mode'] == "本地 Ollama"
+                                                #     else "openai" if st.session_state['llm_mode'] == "OpenAI 在线模型"
+                                                #     else "Deepseek 在线模型"
+                                                # ),
+                                                # openai_key=st.session_state.get('openai_key', ""),
+                                                # deepseek_key=st.session_state.get('deepseek_key', "")
                                             )
                                             st.session_state['optimized_resumes'][job_index] = {
                                                 'resume': final_resume,
@@ -381,7 +386,8 @@ class JobUI:
                                     )
 
             if st.button("对简历进行打分"):
-                report = self.hr.score_resume(st.session_state['resume_text'])
+                # report = self.hr.score_resume(st.session_state['resume_text'])
+                report = self.hr.score_resume_llm(st.session_state['resume_text'])
                 st.subheader("简历评分报告")
                 st.write(report)
 
